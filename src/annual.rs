@@ -411,7 +411,7 @@ async fn compute_annual_potential_gpu_async(
                 mapped_at_creation: false,
             })
         };
-        // Shader writes all five outputs; we only read back glob, but the
+        // Shader writes all five outputs; only read back glob, but the
         // bind group still needs the other four to satisfy the layout.
         let buf_out_beam = make_output("out_beam");
         let buf_out_diff = make_output("out_diff");
@@ -784,9 +784,7 @@ pub fn compute_annual_potential_cpu(
 
                 let mut annual_wh = 0.0f64;
                 for &(declination, sindecl, cosdecl, g_norm_extra) in &day_consts {
-                    let geom = compute_slope_geometry(
-                        slope_rad, aspect_rad, lat, sindecl, cosdecl,
-                    );
+                    let geom = compute_slope_geometry(slope_rad, aspect_rad, lat, sindecl, cosdecl);
                     let (sunrise, sunset) = match compute_sunrise_sunset(&geom) {
                         Some(s) => s,
                         None => continue,
@@ -825,7 +823,10 @@ pub fn compute_annual_potential_cpu(
             if !quiet {
                 let done = rows_done.fetch_add(1, Ordering::Relaxed) + 1;
                 if done % report_interval == 0 {
-                    eprint!("\rCPU annual  Progress: {:.0}%   ", 100.0 * done as f64 / nrows as f64);
+                    eprint!(
+                        "\rCPU annual  Progress: {:.0}%   ",
+                        100.0 * done as f64 / nrows as f64
+                    );
                 }
             }
         });

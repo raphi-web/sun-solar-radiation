@@ -7,7 +7,6 @@ pub mod gpu;
 pub mod horizon;
 pub mod radiation;
 pub mod shadow;
-pub(crate) mod terrain;
 /// r.sun Rust port — Library crate
 ///
 /// Exposes the r.sun solar irradiation model as both a Rust library and
@@ -25,6 +24,7 @@ pub(crate) mod terrain;
 /// sun.compute_raster(elevation="dem.tif", day=172, glob_rad="glob.tif")
 /// ```
 pub mod solar;
+pub(crate) mod terrain;
 
 use gdal::raster::Buffer;
 use gdal::spatial_ref::{AxisMappingStrategy, CoordTransform, SpatialRef};
@@ -212,9 +212,7 @@ pub(crate) fn resolve_slope_aspect(
 /// reproject to EPSG:4326. Latitude varies primarily with the raster's Y axis
 /// within typical tile sizes, so a single per-row sample is accurate enough
 /// while keeping the reprojection cost at O(nrows) rather than O(npixels).
-pub(crate) fn compute_row_latitudes(
-    ds: &Dataset,
-) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+pub(crate) fn compute_row_latitudes(ds: &Dataset) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
     let (ncols, nrows) = ds.raster_size();
     let gt = ds.geo_transform()?;
     let mut src = ds.spatial_ref()?;
