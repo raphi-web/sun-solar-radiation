@@ -9,6 +9,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 .venv/
+/reference
 
 # GRASS reference source archive (kept locally for reference, too large to track)
 /grass-8.3.2/
