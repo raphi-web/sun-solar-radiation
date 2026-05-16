@@ -1,0 +1,37 @@
+[package]
+name = "sun"
+version = "0.1.0"
+edition = "2024"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "allow"
+
+[lib]
+name = "sun"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "sun"
+path = "src/main.rs"
+
+[dependencies]
+gdal = "0.17"
+clap = { version = "4", features = ["derive"] }
+pyo3 = { version = "0.22", features = ["extension-module"] }
+wgpu = "22"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.3"
+rayon = "1"
+
+
+[profile.release]
+opt-level = 3
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+codegen-units = 1
+panic = "abort"
+incremental = false
+overflow-checks = false
+strip = true

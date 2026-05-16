@@ -1,0 +1,17 @@
+# Rust build artefacts
+/target
+
+# Test outputs
+/tests/output/
+
+# Python build / cache
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+
+# GRASS reference source archive (kept locally for reference, too large to track)
+/grass-8.3.2/
+grass_8.3.2-1ubuntu2.debian.tar.xz
+grass_8.3.2-1ubuntu2.dsc
+grass_8.3.2.orig.tar.gz
