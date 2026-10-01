@@ -224,9 +224,9 @@ pub fn compute_radiation(
 /// Integrate daily radiation for a single pixel using Mode 2 (daily irradiation).
 ///
 /// Iterates from sunrise to sunset in time_step increments and accumulates:
-///   beam_irradiation [Wh/m²/day] = Σ beam_irradiance * Δt
-///   diff_irradiation [Wh/m²/day] = Σ diff_irradiance * Δt
-///   refl_irradiation [Wh/m²/day] = Σ refl_irradiance * Δt
+///   beam_irradiation [Wh/m²/day] = sum beam_irradiance * Δt
+///   diff_irradiation [Wh/m²/day] = sum diff_irradiance * Δt
+///   refl_irradiation [Wh/m²/day] = sum refl_irradiance * Δt
 ///   insol_time [h/day] = number of time steps with s0 > 0
 ///
 /// # Arguments
@@ -340,8 +340,8 @@ struct PixelPrecomp {
     cdh_g0_tn: f64, // cdh * G0 * tn_diff — outer factor on fd
     // Slope geometry for the diffuse model:
     sinslope: f64,
-    r_sky: f64, // (1 + cos β) / 2
-    fg: f64,    // Muneer horizon-brightening factor
+    r_sky: f64,         // (1 + cos β) / 2
+    fg: f64,            // Muneer horizon-brightening factor
     albedo_factor: f64, // albedo * (1 - cos β) / 2 — outer factor on reflected
     aspect: f64,
     g_norm_extra: f64,
@@ -403,7 +403,11 @@ fn beam_step(s0: f64, solar_altitude: f64, pre: &PixelPrecomp) -> (f64, f64) {
 
     let cbh_g0_tn = pre.cbh_g0 * tn;
     let beam_horiz = cbh_g0_tn * sin_h;
-    let beam_slope = if pre.has_slope { cbh_g0_tn * s0 } else { beam_horiz };
+    let beam_slope = if pre.has_slope {
+        cbh_g0_tn * s0
+    } else {
+        beam_horiz
+    };
     (beam_slope, beam_horiz)
 }
 

@@ -3,14 +3,32 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "sun"
+name = "sun-solar-radiation"
 version = "0.1.0"
-description = "r.sun solar irradiation model — Rust port with Python bindings"
-requires-python = ">=3.8"
-classifiers = [
-    "Programming Language :: Rust",
-    "Programming Language :: Python :: Implementation :: CPython",
+description = "GPU-accelerated solar radiation modeling for digital elevation models"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
 ]
+requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
+keywords = ["solar", "radiation", "gis", "dem", "gpu", "renewable-energy"]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/sun"
+Repository = "https://github.com/yourusername/sun"
+Issues = "https://github.com/yourusername/sun/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

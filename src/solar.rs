@@ -1,7 +1,6 @@
 /// Solar geometry calculations for r.sun port
 /// Implements the ESRA-based solar model matching GRASS GIS r.sun conventions
 use std::f64::consts::PI;
-
 pub const PI2: f64 = PI * 2.0;
 pub const PIHALF: f64 = PI * 0.5;
 pub const DEG2RAD: f64 = PI / 180.0;
