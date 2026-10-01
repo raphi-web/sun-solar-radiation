@@ -340,6 +340,12 @@ async fn compute_annual_potential_gpu_async(
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
 
+    if !quiet {
+        // Initial checkpoint: setup/pipeline build can take a moment before
+        // the first day runs; show the bar at 0% rather than blank.
+        eprint!("\rProgress: 0%   ");
+    }
+
     let mut row_start = 0usize;
     let mut tile_idx = 0usize;
     while row_start < nrows {

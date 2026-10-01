@@ -721,6 +721,7 @@ fn compute_pixel(
                     gpu=false, quiet=false))]
 #[allow(clippy::too_many_arguments)]
 fn compute_raster(
+    py: Python<'_>,
     elevation: &str,
     day: i32,
     slope: Option<String>,
@@ -742,52 +743,61 @@ fn compute_raster(
     gpu: bool,
     quiet: bool,
 ) -> PyResult<()> {
-    let run = if gpu {
-        gpu::compute_raster_gpu(
-            elevation,
-            &slope,
-            &aspect,
-            &linke,
-            &albedo,
-            &mask,
-            slope_value,
-            aspect_value,
-            linke_value,
-            albedo_value,
-            day,
-            step,
-            solar_constant,
-            &glob_rad,
-            &beam_rad,
-            &diff_rad,
-            &refl_rad,
-            &insol_time,
-            quiet,
-        )
-    } else {
-        run_raster_computation(
-            elevation,
-            &slope,
-            &aspect,
-            &linke,
-            &albedo,
-            &mask,
-            slope_value,
-            aspect_value,
-            linke_value,
-            albedo_value,
-            day,
-            step,
-            solar_constant,
-            &glob_rad,
-            &beam_rad,
-            &diff_rad,
-            &refl_rad,
-            &insol_time,
-            quiet,
-        )
-    };
-    run.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    // Release the GIL for the whole computation: it runs for seconds/minutes
+    // and only touches Rust + native memory. Without this, callers embedding
+    // us in a GUI (QGIS plugin) freeze: their threads cannot run, so progress
+    // reports queue up and arrive in one burst at the end.
+    // Errors are mapped to String inside the closure because Box<dyn Error>
+    // is not Send, which allow_threads requires.
+    let run = py.allow_threads(|| {
+        let result = if gpu {
+            gpu::compute_raster_gpu(
+                elevation,
+                &slope,
+                &aspect,
+                &linke,
+                &albedo,
+                &mask,
+                slope_value,
+                aspect_value,
+                linke_value,
+                albedo_value,
+                day,
+                step,
+                solar_constant,
+                &glob_rad,
+                &beam_rad,
+                &diff_rad,
+                &refl_rad,
+                &insol_time,
+                quiet,
+            )
+        } else {
+            run_raster_computation(
+                elevation,
+                &slope,
+                &aspect,
+                &linke,
+                &albedo,
+                &mask,
+                slope_value,
+                aspect_value,
+                linke_value,
+                albedo_value,
+                day,
+                step,
+                solar_constant,
+                &glob_rad,
+                &beam_rad,
+                &diff_rad,
+                &refl_rad,
+                &insol_time,
+                quiet,
+            )
+        };
+        result.map_err(|e| e.to_string())
+    });
+    run.map_err(pyo3::exceptions::PyRuntimeError::new_err)
 }
 
 /// Compute annual solar potential per m² (GPU).
@@ -852,6 +862,7 @@ fn compute_raster(
                     gpu=false, use_horizon=false, horizon_n_az=64, quiet=false))]
 #[allow(clippy::too_many_arguments)]
 fn compute_annual_potential(
+    py: Python<'_>,
     elevation: &str,
     out_path: &str,
     slope: Option<String>,
@@ -874,54 +885,59 @@ fn compute_annual_potential(
     horizon_n_az: usize,
     quiet: bool,
 ) -> PyResult<()> {
-    let run = if gpu {
-        annual::compute_annual_potential_gpu(
-            elevation,
-            &slope,
-            &aspect,
-            &linke,
-            &albedo,
-            &mask,
-            slope_value,
-            aspect_value,
-            linke_value,
-            albedo_value,
-            day_start,
-            day_end,
-            day_step,
-            step,
-            solar_constant,
-            panel_efficiency,
-            out_path,
-            use_horizon,
-            horizon_n_az,
-            quiet,
-        )
-    } else {
-        annual::compute_annual_potential_cpu(
-            elevation,
-            &slope,
-            &aspect,
-            &linke,
-            &albedo,
-            &mask,
-            slope_value,
-            aspect_value,
-            linke_value,
-            albedo_value,
-            day_start,
-            day_end,
-            day_step,
-            step,
-            solar_constant,
-            panel_efficiency,
-            out_path,
-            use_horizon,
-            horizon_n_az,
-            quiet,
-        )
-    };
-    run.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    // Release the GIL for the whole (long) computation — see compute_raster.
+    // Box<dyn Error> is mapped to String inside the closure: it is not Send.
+    let run = py.allow_threads(|| {
+        let result = if gpu {
+            annual::compute_annual_potential_gpu(
+                elevation,
+                &slope,
+                &aspect,
+                &linke,
+                &albedo,
+                &mask,
+                slope_value,
+                aspect_value,
+                linke_value,
+                albedo_value,
+                day_start,
+                day_end,
+                day_step,
+                step,
+                solar_constant,
+                panel_efficiency,
+                out_path,
+                use_horizon,
+                horizon_n_az,
+                quiet,
+            )
+        } else {
+            annual::compute_annual_potential_cpu(
+                elevation,
+                &slope,
+                &aspect,
+                &linke,
+                &albedo,
+                &mask,
+                slope_value,
+                aspect_value,
+                linke_value,
+                albedo_value,
+                day_start,
+                day_end,
+                day_step,
+                step,
+                solar_constant,
+                panel_efficiency,
+                out_path,
+                use_horizon,
+                horizon_n_az,
+                quiet,
+            )
+        };
+        result.map_err(|e| e.to_string())
+    });
+    run.map_err(pyo3::exceptions::PyRuntimeError::new_err)
 }
 
 /// Create a synthetic 100×100 test elevation raster (central Austria, WGS84).

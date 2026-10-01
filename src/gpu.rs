@@ -432,6 +432,12 @@ async fn compute_raster_gpu_async(
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
 
+    if !quiet {
+        // Initial checkpoint so callers see the bar move even when setup,
+        // dispatch, or a single-tile run dominates the wall-clock time.
+        eprint!("\rProgress: 0%   ");
+    }
+
     let mut row_start = 0usize;
     let mut tile_idx = 0usize;
     while row_start < nrows {
@@ -622,6 +628,15 @@ async fn compute_raster_gpu_async(
             );
         }
         queue.submit(std::iter::once(encoder.finish()));
+
+        if !quiet {
+            // Mid-tile checkpoint: dispatch is submitted, readback pending.
+            // Guarantees sub-100% updates even for single-tile rasters.
+            eprint!(
+                "\rProgress: {:.0}%   ",
+                100.0 * (row_start as f64 + tile_h as f64 * 0.5) / nrows as f64
+            );
+        }
 
         let read_staging = |buf: &wgpu::Buffer, dst: &mut [f32]| {
             let slice = buf.slice(..);
