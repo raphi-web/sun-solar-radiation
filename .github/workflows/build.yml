@@ -66,12 +66,20 @@ jobs:
           echo "GDAL_INCLUDE_DIR=$CONDA_PREFIX/Library/include" >> $GITHUB_ENV
           # Add to PATH for runtime
           echo "$CONDA_PREFIX/Library/bin" >> $GITHUB_PATH
+          echo "$CONDA_PREFIX/Library/lib" >> $GITHUB_PATH
 
       - name: Install maturin
         run: pip install maturin
 
       - name: Build wheels
+        if: matrix.platform != 'windows'
         run: maturin build --release
+
+      - name: Build wheels (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash -l {0}
+        run: |
+          maturin build --release
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
