@@ -47,14 +47,18 @@ jobs:
 
       - name: Install GDAL (Windows)
         if: matrix.platform == 'windows'
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: '3.12'
+          channels: conda-forge
+          activate-environment: test
+
+      - name: Install GDAL via conda (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash -l {0}
         run: |
-          # Use conda to install GDAL on Windows
-          $env:CONDA_EXE = "C:\Miniconda3\condabin\conda.exe"
-          & $env:CONDA_EXE install -y -c conda-forge gdal
-          # Add conda environment to PATH
-          $condaEnv = & $env:CONDA_EXE info --base
-          echo "$condaEnv\Library\bin" >> $env:GITHUB_PATH
-          echo "$condaEnv\Scripts" >> $env:GITHUB_PATH
+          conda install -y gdal
 
       - name: Install maturin
         run: pip install maturin
