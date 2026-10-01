@@ -641,6 +641,11 @@ async fn compute_raster_gpu_async(
 
         row_start = row_end;
         tile_idx += 1;
+        // Row-band progress: rows finished / total rows. Matches the CPU
+        // `\rProgress: N%` format so callers parsing stderr see one scheme.
+        if !quiet {
+            eprint!("\rProgress: {:.0}%   ", 100.0 * row_end as f64 / nrows as f64);
+        }
     }
 
     // ── Statistics ────────────────────────────────────────────────────────────

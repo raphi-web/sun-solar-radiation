@@ -242,6 +242,8 @@ async fn compute_annual_potential_gpu_async(
     let tile_rows = ((binding_budget / bytes_per_row.max(1)) as usize)
         .max(1)
         .min(nrows);
+    // Total row-band tiles; used for `\rProgress: N%` reporting below.
+    let n_tiles = nrows.div_ceil(tile_rows);
 
     // ── Bind group layout + pipeline (shared across days & tiles) ───────────
     let storage_ro = |binding: u32| wgpu::BindGroupLayoutEntry {
@@ -561,6 +563,16 @@ async fn compute_annual_potential_gpu_async(
                     "GPU annual  Tile {tile_idx}: day {}/{} done",
                     di + 1,
                     days.len()
+                );
+            }
+            // Overall progress: tiles×days grid position. Same `\rProgress: N%`
+            // scheme as the CPU paths so stderr parsers see one format.
+            if !quiet {
+                let total_units = n_tiles * days.len();
+                let done_units = tile_idx * days.len() + di + 1;
+                eprint!(
+                    "\rProgress: {:.0}%   ",
+                    100.0 * done_units as f64 / total_units as f64
                 );
             }
         }
