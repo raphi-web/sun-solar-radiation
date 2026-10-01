@@ -17,10 +17,15 @@ cd "$REPO_ROOT"
 
 MODE="${1:-dry-run}"
 
-echo "==> Building wheel for CPython 3.12 (QGIS's interpreter)…"
-maturin build --release --skip-auditwheel -i /usr/bin/python3
+echo "==> Building manylinux wheel for CPython 3.12 (QGIS's interpreter)…"
+# NOTE: PyPI only accepts manylinux wheels. We build WITHOUT --skip-auditwheel
+# so auditwheel relabels the wheel as manylinux_2_39 and bundles the required
+# shared libraries (GDAL, etc.) — the wheel is ~54MB but self-contained.
+# For the QGIS plugin (which uses system GDAL), use scripts/build_qgis_plugin.sh
+# instead, which uses --skip-auditwheel.
+maturin build --release -i /usr/bin/python3
 
-WHEEL="$(ls -t target/wheels/sun_solar_radiation-*-cp312-*.whl | head -1)"
+WHEEL="$(ls -t target/wheels/sun_solar_radiation-*-manylinux*.whl | head -1)"
 echo "==> Built: $WHEEL"
 
 echo "==> Checking wheel metadata with twine…"

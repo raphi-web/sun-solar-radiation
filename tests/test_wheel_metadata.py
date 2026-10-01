@@ -81,17 +81,17 @@ def test_license_file_exists():
 def test_build_produces_wheel():
     """Verify maturin can build a wheel."""
     result = subprocess.run(
-        ["maturin", "build", "--release", "--skip-auditwheel", "-i", "/usr/bin/python3"],
+        ["maturin", "build", "--release", "-i", "/usr/bin/python3"],
         cwd=Path(__file__).parent.parent,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, f"maturin build failed:\n{result.stderr}"
     
-    # Check that a wheel was created
+    # Check that a manylinux wheel was created (PyPI requires manylinux)
     target_dir = Path(__file__).parent.parent / "target" / "wheels"
-    wheels = list(target_dir.glob("sun_solar_radiation-*.whl"))
-    assert len(wheels) > 0, "No wheel file produced"
+    wheels = list(target_dir.glob("sun_solar_radiation-*-manylinux*.whl"))
+    assert len(wheels) > 0, "No manylinux wheel file produced"
 
 
 def test_wheel_metadata_is_valid():
