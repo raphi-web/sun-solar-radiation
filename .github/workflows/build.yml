@@ -59,6 +59,13 @@ jobs:
         shell: bash -l {0}
         run: |
           conda install -y gdal
+          # Set GDAL environment variables for Rust gdal-sys
+          CONDA_PREFIX=$(conda info --base)/envs/test
+          echo "GDAL_HOME=$CONDA_PREFIX/Library" >> $GITHUB_ENV
+          echo "GDAL_LIB_DIR=$CONDA_PREFIX/Library/lib" >> $GITHUB_ENV
+          echo "GDAL_INCLUDE_DIR=$CONDA_PREFIX/Library/include" >> $GITHUB_ENV
+          # Add to PATH for runtime
+          echo "$CONDA_PREFIX/Library/bin" >> $GITHUB_PATH
 
       - name: Install maturin
         run: pip install maturin
