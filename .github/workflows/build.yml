@@ -66,6 +66,8 @@ jobs:
           # Add to PATH for runtime
           echo "$CONDA_PREFIX/Library/bin" >> $GITHUB_PATH
           echo "$CONDA_PREFIX/Library/lib" >> $GITHUB_PATH
+          # Verify gdal_i.lib exists
+          ls -la "$CONDA_PREFIX/Library/lib/" | grep -i gdal
 
       - name: Install maturin
         run: pip install maturin
