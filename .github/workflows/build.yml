@@ -42,9 +42,7 @@ jobs:
 
       - name: Install GDAL (macOS)
         if: matrix.platform == 'macos'
-        run: |
-          brew install gdal@3.9
-          brew link gdal@3.9 --force
+        run: brew install gdal
 
       - name: Install GDAL (Windows)
         if: matrix.platform == 'windows'
