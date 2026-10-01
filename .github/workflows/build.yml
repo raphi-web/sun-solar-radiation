@@ -42,7 +42,23 @@ jobs:
 
       - name: Install GDAL (macOS)
         if: matrix.platform == 'macos'
-        run: brew install gdal
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: "latest"
+          auto-update-conda: true
+          python-version: ${{ matrix.python-version }}
+          channels: conda-forge
+      
+      - name: Install GDAL via conda (macOS)
+        if: matrix.platform == 'macos'
+        shell: bash -l {0}
+        run: |
+          conda install -c conda-forge gdal=3.9.3
+          echo "GDAL_INCLUDE_DIR=$CONDA_PREFIX/include" >> $GITHUB_ENV
+          echo "GDAL_LIB_DIR=$CONDA_PREFIX/lib" >> $GITHUB_ENV
+          echo "GDAL_BIN_DIR=$CONDA_PREFIX/bin" >> $GITHUB_ENV
+          echo "$CONDA_PREFIX/lib" >> $GITHUB_PATH
+          echo "$CONDA_PREFIX/bin" >> $GITHUB_PATH
 
       - name: Install GDAL (Windows)
         if: matrix.platform == 'windows'
