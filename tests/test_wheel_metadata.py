@@ -134,7 +134,7 @@ def test_no_hardcoded_paths_in_wheel():
     )
     
     target_dir = Path(__file__).parent.parent / "target" / "wheels"
-    wheels = list(target_dir.glob("sun-*.whl"))
+    wheels = list(target_dir.glob("sun_solar_radiation-*.whl"))
     assert len(wheels) > 0
     
     wheel = wheels[0]
