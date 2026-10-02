@@ -1,4 +1,4 @@
-name: Build Windows Wheel
+name: Build Wheels
 
 on:
   push:
@@ -9,10 +9,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows:
-    name: Build Windows wheel
-    runs-on: windows-latest
-    
+  build:
+    name: Build wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
     steps:
       - uses: actions/checkout@v4
 
@@ -24,59 +28,46 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Miniconda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          auto-update-conda: true
-          python-version: '3.12'
-          channels: conda-forge
-
-      - name: Install GDAL via conda
-        shell: bash -l {0}
-        run: |
-          conda install -y gdal=3.9 pkg-config
-          # Set GDAL environment variables for Rust gdal-sys
-          CONDA_PREFIX=$(conda info --base)/envs/test
-          echo "GDAL_HOME=$CONDA_PREFIX/Library" >> $GITHUB_ENV
-          echo "GDAL_LIB_DIR=$CONDA_PREFIX/Library/lib" >> $GITHUB_ENV
-          echo "GDAL_INCLUDE_DIR=$CONDA_PREFIX/Library/include" >> $GITHUB_ENV
-          # Add to PATH for runtime
-          echo "$CONDA_PREFIX/Library/bin" >> $GITHUB_PATH
-          echo "$CONDA_PREFIX/Library/lib" >> $GITHUB_PATH
-          # Verify gdal_i.lib exists
-          ls -la "$CONDA_PREFIX/Library/lib/" | grep -i gdal || echo "gdal_i.lib not found in lib"
-          ls -la "$CONDA_PREFIX/Library/bin/" | grep -i gdal || echo "gdal not found in bin"
-
       - name: Install maturin
         run: pip install maturin
 
+      # No GDAL, no conda, no pkg-config: the extension is built without the
+      # gdal-io feature, so it only needs Rust + Python headers. Raster I/O
+      # lives in the QGIS plugin's Python side.
       - name: Build wheel
-        shell: bash -l {0}
+        run: maturin build --release
+
+      - name: Smoke-test wheel
+        shell: bash
         run: |
-          # Re-set GDAL env vars for this step
-          CONDA_PREFIX=$(conda info --base)/envs/test
-          export GDAL_HOME="$CONDA_PREFIX/Library"
-          export GDAL_LIB_DIR="$CONDA_PREFIX/Library/lib"
-          export GDAL_INCLUDE_DIR="$CONDA_PREFIX/Library/include"
-          
-          # Create symlink: gdal-sys expects gdal_i.lib but conda provides gdal.lib
-          if [ -f "$GDAL_LIB_DIR/gdal.lib" ] && [ ! -f "$GDAL_LIB_DIR/gdal_i.lib" ]; then
-            echo "Creating symlink: gdal_i.lib -> gdal.lib"
-            cp "$GDAL_LIB_DIR/gdal.lib" "$GDAL_LIB_DIR/gdal_i.lib"
-          fi
-          
-          echo "Building with GDAL from: $GDAL_LIB_DIR"
-          maturin build --release
+          pip install numpy
+          pip install --force-reinstall target/wheels/sun_solar_radiation-*.whl
+          python -c "
+          import numpy as np, sun
+          assert hasattr(sun, 'compute_raster_bands')
+          assert hasattr(sun, 'compute_annual_bands')
+          assert hasattr(sun, 'horn_slope_aspect')
+          assert not hasattr(sun, 'compute_raster'), 'path API leaked into wheel'
+          elev = np.full(30 * 20, 500.0, dtype=np.float32)
+          lat = np.full(20, 47.5, dtype=np.float32)
+          out = sun.compute_raster_bands(elev, 30, 20, lat, 172, step=0.5,
+                                         dx_m=30.0, dy_m=30.0, outputs=['glob'])
+          glob = np.asarray(out['glob'])
+          assert glob.shape == (600,)
+          valid = glob[glob != -9999.0]
+          assert valid.size > 0 and 500 < valid.max() < 15000, valid.max()
+          print('OK:', sun.__file__, '- array API computes on this platform')
+          "
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-windows
+          name: wheels-${{ matrix.os }}
           path: target/wheels/*.whl
 
   publish:
     name: Publish to PyPI
-    needs: [build-windows]
+    needs: [build]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     environment: pypi
@@ -87,8 +78,9 @@ jobs:
       - name: Download wheels
         uses: actions/download-artifact@v4
         with:
-          name: wheels-windows
+          pattern: wheels-*
           path: dist
+          merge-multiple: true
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
