@@ -9,7 +9,7 @@ description = "GPU-accelerated solar radiation modeling for digital elevation mo
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Raphael Prinz", email = "raphael.prinz1993@gmail.com"}
 ]
 requires-python = ">=3.12"
 classifiers = [
@@ -26,9 +26,9 @@ classifiers = [
 keywords = ["solar", "radiation", "gis", "dem", "gpu", "renewable-energy"]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/sun"
-Repository = "https://github.com/yourusername/sun"
-Issues = "https://github.com/yourusername/sun/issues"
+Homepage = "https://github.com/raphi-web/sun-solar-radiation"
+Repository = "https://github.com/raphi-web/sun-solar-radiation"
+Issues = "https://github.com/raphi-web/sun-solar-radiation/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
