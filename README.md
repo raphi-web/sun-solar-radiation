@@ -10,6 +10,27 @@ model as a native Python extension with an optional WebGPU compute path.
 - **Big-raster friendly**: the array API processes row bands, so Python callers can stream rasters larger than RAM
 - **GPU when available, CPU always**: measured 5–17× speedup on integrated graphics; the CPU path is rayon-parallel
 
+## Validation at a glance
+
+The engine is validated against GRASS GIS `r.sun` 8.3.2 on synthetic alpine
+terrain and a controlled wall-shadow geometry. Full numbers, reproduction
+scripts, and the two bugs the comparison exposed (both fixed) live in
+[`validation/VALIDATION.md`](validation/VALIDATION.md).
+
+![Input DEM next to sun and GRASS r.sun global irradiation for day 355 and their difference map on 200x200 synthetic alpine terrain](validation/maps.png)
+
+Left to right: input DEM; `sun` global irradiation, day 355; GRASS `r.sun`
+global irradiation, day 355; difference in Wh/m². On controlled surfaces the
+radiation physics matches r.sun to better than 0.01%; residual differences
+concentrate at shadow terminators.
+
+![Global irradiation profile across a controlled 1000 m wall at winter solstice, comparing GRASS no-shadow reference, GRASS r.sun hard terminator and sun gradual penumbra](validation/wall_profile.png)
+
+Controlled 1000 m wall, winter solstice: in deep shadow both engines agree
+exactly (435 Wh/m²/day). They differ only at the shadow edge, where `sun`
+resolves partial occlusion (penumbra) that the binary horizon lookup of
+r.sun cannot.
+
 ## Installation
 
 ### From PyPI
