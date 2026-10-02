@@ -7,6 +7,7 @@ pub mod arrays;
 pub mod annual;
 #[cfg(feature = "gdal-io")]
 pub mod gpu;
+pub mod gpu_array;
 pub mod horizon;
 pub mod radiation;
 pub mod shadow;
@@ -1110,13 +1111,6 @@ fn compute_raster_bands<'py>(
     gpu: bool,
     quiet: bool,
 ) -> PyResult<std::collections::HashMap<String, Bound<'py, PyArray1<f32>>>> {
-    if gpu {
-        return Err(pyo3::exceptions::PyNotImplementedError::new_err(
-            "gpu=True is not yet available on the array API; pass gpu=False \
-             (the QGIS plugin falls back to the CPU path automatically)",
-        ));
-    }
-
     let npixels = ncols.checked_mul(nrows).ok_or_else(|| {
         pyo3::exceptions::PyValueError::new_err("ncols*nrows overflows")
     })?;
@@ -1207,10 +1201,30 @@ fn compute_raster_bands<'py>(
     inp.validate().map_err(pyo3::exceptions::PyValueError::new_err)?;
 
     // The heavy loop runs with the GIL released so the embedding GUI stays
-    // responsive and progress reports can be parsed concurrently.
+    // responsive and progress reports can be parsed concurrently. The GPU
+    // path (wgpu dispatch + readback inside pollster::block_on) also runs
+    // GIL-free. GPU errors are RuntimeError — they're environmental (no
+    // adapter), not argument errors.
     let out = py
-        .allow_threads(|| arrays::compute_daily_band_cpu(&inp, day, step, solar_constant, wants, quiet))
-        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        .allow_threads(|| {
+            if gpu {
+                let g = gpu_array::compute_daily_band_gpu(
+                    &inp, day, step, solar_constant, quiet,
+                )
+                .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+                // The shader computes all five components; filter to wants.
+                Ok::<_, pyo3::PyErr>(arrays::DailyBandOut {
+                    beam: wants.beam.then_some(g.beam),
+                    diffuse: wants.diffuse.then_some(g.diffuse),
+                    reflected: wants.reflected.then_some(g.reflected),
+                    global: wants.global.then_some(g.global),
+                    insol: wants.insol.then_some(g.insol),
+                })
+            } else {
+                arrays::compute_daily_band_cpu(&inp, day, step, solar_constant, wants, quiet)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)
+            }
+        })?;
 
     let mut result = std::collections::HashMap::new();
     if let Some(v) = out.beam {
@@ -1272,11 +1286,6 @@ fn compute_annual_bands<'py>(
     horizon_n_az: usize,
     quiet: bool,
 ) -> PyResult<Bound<'py, PyArray1<f32>>> {
-    if gpu {
-        return Err(pyo3::exceptions::PyNotImplementedError::new_err(
-            "gpu=True is not yet available on the array API; pass gpu=False",
-        ));
-    }
     if day_step <= 0 {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "day_step must be positive",
@@ -1374,18 +1383,32 @@ fn compute_annual_bands<'py>(
 
     let potential = py
         .allow_threads(|| {
-            arrays::compute_annual_band_cpu(
-                &inp,
-                &days,
-                day_step,
-                step,
-                solar_constant,
-                panel_efficiency,
-                horizon_map.as_ref(),
-                quiet,
-            )
-        })
-        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+            if gpu {
+                gpu_array::compute_annual_band_gpu(
+                    &inp,
+                    &days,
+                    day_step,
+                    step,
+                    solar_constant,
+                    panel_efficiency,
+                    horizon_map.as_ref(),
+                    quiet,
+                )
+                .map_err(pyo3::exceptions::PyRuntimeError::new_err)
+            } else {
+                arrays::compute_annual_band_cpu(
+                    &inp,
+                    &days,
+                    day_step,
+                    step,
+                    solar_constant,
+                    panel_efficiency,
+                    horizon_map.as_ref(),
+                    quiet,
+                )
+                .map_err(pyo3::exceptions::PyValueError::new_err)
+            }
+        })?;
 
     Ok(potential.into_pyarray_bound(py))
 }
@@ -1447,5 +1470,14 @@ fn sun(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compute_raster_bands, m)?)?;
     m.add_function(wrap_pyfunction!(compute_annual_bands, m)?)?;
     m.add_function(wrap_pyfunction!(horn_slope_aspect, m)?)?;
+    m.add_function(wrap_pyfunction!(gpu_available, m)?)?;
     Ok(())
+}
+
+/// Probe whether a usable GPU adapter (Vulkan/Metal/DX12 via wgpu) is
+/// present. Returns False instead of raising, so callers can fall back to
+/// the CPU path cleanly.
+#[pyfunction]
+fn gpu_available() -> bool {
+    gpu_array::gpu_available()
 }
