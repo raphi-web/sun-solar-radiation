@@ -15,7 +15,7 @@ name = "sun"
 path = "src/main.rs"
 
 [dependencies]
-gdal = { version = "0.19", features = ["bindgen"] }
+gdal = "0.17"
 clap = { version = "4", features = ["derive"] }
 pyo3 = { version = "0.22", features = ["extension-module"] }
 wgpu = "22"
