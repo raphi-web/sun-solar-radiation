@@ -188,6 +188,29 @@ pub fn compute_sunrise_sunset(geom: &SlopeGeometry) -> Option<(f64, f64)> {
     Some((sunrise, sunset))
 }
 
+/// Integration window for a pixel: the HORIZONTAL day (sunrise to sunset on
+/// a flat plane at this latitude), not the slope-plane day.
+///
+/// GRASS r.sun integrates every time step of the horizontal day and gates
+/// beam/insolation by the slope incidence (s0 > 0). Using the slope-plane
+/// window instead drops pixels whose slope-plane sunrise equation has no
+/// solution — steep north-facing slopes in winter (sun never clears the
+/// plane) and east/west-facing slopes (partial-day solutions) — losing their
+/// diffuse and reflected radiation even though the sky is fully visible.
+/// The s0 > 0 gate inside `integrate_daily` keeps beam and insolation at
+/// zero on never-sunlit slopes, reproducing GRASS exactly.
+///
+/// Returns None only for polar night (sun never rises on the horizontal).
+#[inline]
+pub fn horizontal_day_window(
+    latitude: f64,
+    sindecl: f64,
+    cosdecl: f64,
+) -> Option<(f64, f64)> {
+    let flat = compute_slope_geometry(0.0, 0.0, latitude, sindecl, cosdecl);
+    compute_sunrise_sunset(&flat)
+}
+
 /// Convert hour angle [radians] to local solar time [hours, 0-24]
 #[inline]
 pub fn hour_angle_to_time(omega: f64) -> f64 {

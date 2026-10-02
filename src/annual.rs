@@ -15,7 +15,7 @@ use wgpu::util::DeviceExt;
 
 use crate::radiation::{RadiationParams, integrate_daily};
 use crate::solar::{
-    DEG2RAD, com_declin, com_sol_const, compute_slope_geometry, compute_sunrise_sunset,
+    DEG2RAD, com_declin, com_sol_const, compute_slope_geometry, horizontal_day_window,
 };
 use crate::{
     UNDEFZ, compute_row_latitudes, convert_grass_aspect, read_elev_normalized,
@@ -803,9 +803,11 @@ pub fn compute_annual_potential_cpu(
                 let mut annual_wh = 0.0f64;
                 for &(declination, sindecl, cosdecl, g_norm_extra) in &day_consts {
                     let geom = compute_slope_geometry(slope_rad, aspect_rad, lat, sindecl, cosdecl);
-                    let (sunrise, sunset) = match compute_sunrise_sunset(&geom) {
+                    // Horizontal-day window (GRASS parity): never-sunlit
+                    // slopes keep diffuse+reflected; beam gated by s0 > 0.
+                    let (sunrise, sunset) = match horizontal_day_window(lat, sindecl, cosdecl) {
                         Some(s) => s,
-                        None => continue,
+                        None => continue, // polar night
                     };
 
                     let params = RadiationParams {

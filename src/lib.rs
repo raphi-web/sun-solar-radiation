@@ -45,7 +45,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use radiation::{DailyIrradiation, RadiationParams, integrate_daily};
-use solar::{DEG2RAD, com_declin, com_sol_const, compute_slope_geometry, compute_sunrise_sunset};
+use solar::{DEG2RAD, com_declin, com_sol_const, compute_slope_geometry, horizontal_day_window};
 #[cfg(feature = "gdal-io")]
 use solar::RAD2DEG;
 
@@ -59,9 +59,14 @@ pub const UNDEFZ: f32 = -9999.0;
 /// GRASS aspect convention: 0=East, 90=North, 180=West, 270=South (CCW from East).
 /// r.sun internal convention: compass bearing, North=0, East=90°, South=180°.
 pub fn convert_grass_aspect(aspect_deg: f64) -> f64 {
-    if aspect_deg == 0.0 {
-        return 0.0;
-    }
+    // GRASS raster convention: degrees CCW from East (0=E, 90=N, 180=W,
+    // 270=S). Internal convention: radians CW-ish with 0=N, PI/2=E, PI=S,
+    // 3PI/2=W. NOTE: aspect 0 (due East) must NOT be special-cased — flat
+    // pixels (r.slope.aspect also emits 0 there) are handled by the
+    // slope==0 branch in compute_slope_geometry, which ignores aspect.
+    // A historical `if aspect_deg == 0.0 { return 0.0; }` here silently
+    // computed East-facing slopes as North-facing (GRASS parity test caught
+    // it: East winter beam was 0 instead of ~1136 Wh/m²/day).
     let converted = if aspect_deg < 90.0 {
         90.0 - aspect_deg
     } else {
@@ -110,7 +115,9 @@ pub fn compute_pixel_irradiation(
     let aspect_rad = convert_grass_aspect(aspect_deg);
 
     let geom = compute_slope_geometry(slope_rad, aspect_rad, lat, sindecl, cosdecl);
-    let (sunrise, sunset) = compute_sunrise_sunset(&geom)?;
+    // Horizontal-day window (GRASS parity): never-sunlit slopes keep
+    // diffuse+reflected; beam/insolation stay 0 via the s0 > 0 gate.
+    let (sunrise, sunset) = horizontal_day_window(lat, sindecl, cosdecl)?;
 
     let params = RadiationParams {
         g_norm_extra,
@@ -442,9 +449,11 @@ pub fn run_raster_computation(
                 let aspect_rad = convert_grass_aspect(aspect_deg);
 
                 let geom = compute_slope_geometry(slope_rad, aspect_rad, lat, sindecl, cosdecl);
-                let (sunrise, sunset) = match compute_sunrise_sunset(&geom) {
+                // Horizontal-day window (GRASS parity): never-sunlit slopes
+                // keep diffuse+reflected; beam/insolation gated by s0 > 0.
+                let (sunrise, sunset) = match horizontal_day_window(lat, sindecl, cosdecl) {
                     Some(s) => s,
-                    None => continue,
+                    None => continue, // polar night
                 };
 
                 let params = RadiationParams {

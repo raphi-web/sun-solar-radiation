@@ -18,7 +18,7 @@ use rayon::prelude::*;
 
 use crate::radiation::{RadiationParams, integrate_daily};
 use crate::shadow::ShadowContext;
-use crate::solar::{DEG2RAD, com_declin, com_sol_const, compute_slope_geometry, compute_sunrise_sunset};
+use crate::solar::{DEG2RAD, com_declin, com_sol_const, compute_slope_geometry, horizontal_day_window};
 use crate::terrain::horn_slope_aspect;
 use crate::{UNDEFZ, convert_grass_aspect};
 
@@ -198,9 +198,9 @@ pub fn compute_daily_band_cpu(
                 let aspect_rad = convert_grass_aspect(inp.aspect[idx] as f64);
 
                 let geom = compute_slope_geometry(slope_rad, aspect_rad, lat, sindecl, cosdecl);
-                let (sunrise, sunset) = match compute_sunrise_sunset(&geom) {
+                let (sunrise, sunset) = match horizontal_day_window(lat, sindecl, cosdecl) {
                     Some(s) => s,
-                    None => continue,
+                    None => continue, // polar night
                 };
 
                 let params = RadiationParams {
@@ -363,9 +363,11 @@ pub fn compute_annual_band_cpu(
                 let mut acc = 0.0f64;
                 for &(declination, sindecl, cosdecl, g_norm_extra) in &day_consts {
                     let geom = compute_slope_geometry(slope_rad, aspect_rad, lat, sindecl, cosdecl);
-                    let (sunrise, sunset) = match compute_sunrise_sunset(&geom) {
+                    // Horizontal-day window: see compute_daily_band_cpu. Keeps
+                    // diffuse+reflected on never-sunlit slopes (GRASS parity).
+                    let (sunrise, sunset) = match horizontal_day_window(lat, sindecl, cosdecl) {
                         Some(s) => s,
-                        None => continue,
+                        None => continue, // polar night
                     };
                     let params = RadiationParams {
                         g_norm_extra,

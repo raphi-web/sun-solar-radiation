@@ -80,7 +80,8 @@ struct SlopeGeometry {
 
 // Convert GRASS aspect (0=E CCW, degrees) to r.sun radians (CW from North).
 fn convert_grass_aspect(aspect_deg: f32) -> f32 {
-    if aspect_deg == 0.0 { return 0.0; }
+    // Same as the Rust side: NO special case for 0 (due East). Flat pixels
+    // are handled by the slope<1e-6 branch below, which ignores aspect.
     var c: f32;
     if aspect_deg < 90.0 {
         c = 90.0 - aspect_deg;
@@ -432,11 +433,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let slope_rad  = slope_deg * DEG2RAD;
     let aspect_rad = convert_grass_aspect(aspect_deg);
 
-    // ── Slope geometry + sunrise/sunset ───────────────────────────────────────
+    // ── Slope geometry + integration window ─────────────────────────────────
     let geom = compute_slope_geometry(slope_rad, aspect_rad, lat,
                                       u.sindecl, u.cosdecl);
-    let sr = compute_sunrise_sunset(geom);
-    if !sr.valid {
+    // Integrate over the HORIZONTAL day (GRASS r.sun parity). The slope-plane
+    // window degenerates for never-sunlit orientations (north-facing in
+    // winter) and partial-day ones (east/west), dropping their diffuse and
+    // reflected radiation. beam/insolation stay gated by s0 > 0 below.
+    let flat_geom = compute_slope_geometry(0.0, 0.0, lat, u.sindecl, u.cosdecl);
+    let sr = compute_sunrise_sunset(flat_geom);
+    if (!sr.valid) {
+        // Polar night: the sun never rises on the horizontal either.
         out_beam[idx]  = UNDEFZ;
         out_diff[idx]  = UNDEFZ;
         out_refl[idx]  = UNDEFZ;

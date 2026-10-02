@@ -201,14 +201,21 @@ mod tests {
     #[test]
     fn test_aspect_conversion() {
         use std::f64::consts::PI;
+        // GRASS raster convention (CCW from East) -> internal radians
+        // (0=N, PI/2=E, PI=S, 3PI/2=W).
         let south = convert_grass_aspect(270.0);
         assert!((south - PI).abs() < 1e-10, "South aspect: {south:.4} rad");
 
+        // Due East must map to PI/2, NOT 0 (0 is North). A historical
+        // special case collapsed East into North; GRASS parity caught it.
         let east = convert_grass_aspect(0.0);
-        assert_eq!(east, 0.0, "East aspect");
+        assert!((east - PI / 2.0).abs() < 1e-10, "East aspect: {east:.4} rad");
 
         let north = convert_grass_aspect(90.0);
-        assert!((north - PI * 2.0).abs() < 0.01, "North aspect: {north:.4}");
+        assert!(north.rem_euclid(PI * 2.0).abs() < 0.01, "North aspect: {north:.4} rad");
+
+        let west = convert_grass_aspect(180.0);
+        assert!((west - 1.5 * PI).abs() < 1e-10, "West aspect: {west:.4} rad");
     }
 
     #[test]

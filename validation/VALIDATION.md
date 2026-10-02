@@ -51,18 +51,27 @@ shadows off on both sides (`r.sun -p` vs all-nodata shadow context):
 Slope-incidence math is identical when both engines read the same aspect
 raster.
 
-### 3. Rough terrain, full pipeline
+### 3. Rough terrain, full pipeline (post-fix)
 
 | Day | Shadows | sun glob | GRASS glob | bias | corr | nodata agreement |
 |----|----|----|----|----|----|----|
-| 172 | off | 8884.2 | 8945.1 | −0.68% | 0.985 | 100% |
-| 172 | on | 8612.3 | 8938.4 | −3.65% | 0.745 | 100% |
-| 355 | off | 1696.3 | 1742.6 | −2.66% | 0.999 | 98.8% |
-| 355 | on | 1546.8 | 1733.9 | −10.79% | 0.982 | 98.8% |
+| 172 | off | 8932.1 | 8945.1 | −0.15% | 0.999 | 100% |
+| 172 | on | 8660.3 | 8938.4 | −3.11% | 0.784 | 100% |
+| 355 | off | 1721.1 | 1726.5 | −0.31% | 1.000 | 100% |
+| 355 | on | 1573.4 | 1717.9 | −8.41% | 0.983 | 100% |
 
-With shadows disabled on both sides the engines agree within ~1–3% (the
-residual is the penumbra/terminator difference below). With shadows on, the
-winter bias grows to ~11% — decomposed in §4 and §5.
+Orientation check (uniform 20° planes, day 355, shadows off), post-fix:
+
+| Facing (GRASS CCW-from-east) | sun | GRASS | rel. diff |
+|----|----|----|----|
+| east (0) | 1581.6 | 1593.0 | −0.7% |
+| north (90) | 415.8 | 435.2 | −4.5% |
+| west (180) | 1581.6 | 1593.0 | −0.7% |
+| south (270) | 3082.8 | 3083.0 | −0.0% |
+
+The residual shadow-on bias is now entirely the §4 penumbra-vs-terminator
+modeling difference (it grows with slope: −2.4% at 0–5° to −16.8% at
+25–40°, where the terminator cuts a larger share of each pixel's day).
 
 ### 4. Shadow model: penumbra vs hard terminator
 
@@ -79,26 +88,28 @@ This is a *modeling* difference, not a bug: the ray-march resolves partial
 occlusion that r.sun's horizon binarization cannot. It costs a few percent
 of mean flux near terminators and explains the shadow-off residual bias.
 
-### 5. BUG FOUND: nodata on slopes the sun never clears
+### 5. FIXED: nodata on slopes the sun never clears (+ east-facing bug)
 
-Where the sun never rises above the slope plane (steep **north-facing**
-slopes in winter), `compute_sunrise_sunset` returns None and the pixel is
-written as nodata — dropping diffuse and reflected radiation too. r.sun
-keeps those pixels: beam = 0 but diffuse + reflected are integrated over the
-day. Evidence:
+Two bugs found by this comparison, both fixed (commit "fix: horizontal-day
+integration window + east aspect collapse"):
 
-- Test DEM day 355: 472/40000 pixels (1.2%) nodata in sun, valid in GRASS;
-  **100% of them north-facing** (compass 315–45°); GRASS values there ≈
-  414 Wh/m²/day (pure diffuse).
-- Uniform 20° plane, day 355: sun returns nodata for east and north aspects
-  (n=0 valid pixels); GRASS returns 435 (north, diffuse-only) and 1593
-  (east, morning beam).
-- `compute_pixel` raises "No sunrise …" for the same inputs.
+**a) Never-sunlit slopes lost diffuse+reflected.** Where the sun never
+rises above the slope plane (steep north-facing slopes in winter), the
+engine integrated over the *slope-plane* day, whose sunrise equation has no
+solution → pixel written as nodata, dropping sky radiation entirely. GRASS
+integrates the *horizontal* day and gates beam by slope incidence (s0 > 0),
+keeping diffuse+reflected. Fix: `solar::horizontal_day_window()` — all
+compute paths (CPU bands, annual, pixel, path-based CPU, WGSL shader) now
+integrate the horizontal day; beam/insolation stay 0 on never-sunlit slopes.
+Before: 472/40000 pixels nodata-only-in-sun on day 355 (100% north-facing).
+After: nodata agreement 100% (0 mismatches both directions).
 
-Physically the sky is still visible from such slopes, so diffuse/reflected
-must survive. Fix: when the slope-plane sunrise is undefined but the
-horizontal day is not, integrate diffuse/reflected over the horizontal
-sunrise–sunset window with beam = insol = 0.
+**b) Due-east aspect collapsed to north.** `convert_grass_aspect` had a
+special case `aspect_deg == 0.0 → 0.0 rad`, but internal 0 rad is *north*,
+so east-facing slopes were computed as north-facing (winter beam 0 instead
+of ~1136 Wh/m²/day). The special case existed for flat pixels, but those are
+already handled by the slope==0 branch of `compute_slope_geometry`. Removed
+in Rust and WGSL; `test_aspect_conversion` now pins east → π/2.
 
 ### 6. Aspect convention (scalar vs raster)
 
@@ -125,6 +136,8 @@ with raster size (see README benchmarks).
 ## Verdict
 
 Radiation physics (geometry, ESRA atmosphere, slope incidence, albedo) is
-numerically identical to r.sun (<0.01% on controlled surfaces). Two
-deliberate/known divergences remain: penumbra at shadow terminators (sun is
-finer-grained), and the §5 nodata bug on never-sunlit slopes (to be fixed).
+numerically identical to r.sun (<0.01% on controlled surfaces). Two bugs the
+comparison exposed are fixed (never-sunlit nodata; east-aspect collapse).
+One deliberate modeling difference remains: penumbra at shadow terminators
+(sun resolves partial occlusion; r.sun's horizon lookup is binary), which
+accounts for the entire residual shadow-on bias.
