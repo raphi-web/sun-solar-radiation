@@ -1,4 +1,4 @@
-name: Build Wheels
+name: Build Windows Wheel
 
 on:
   push:
@@ -9,20 +9,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build wheels on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux
-          - os: macos-latest
-            platform: macos
-          - os: windows-latest
-            platform: windows
-
+  build-windows:
+    name: Build Windows wheel
+    runs-on: windows-latest
+    
     steps:
       - uses: actions/checkout@v4
 
@@ -34,43 +24,14 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install GDAL (Linux)
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgdal-dev gdal-bin
-
-      - name: Install GDAL (macOS)
-        if: matrix.platform == 'macos'
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniconda-version: "latest"
-          auto-update-conda: true
-          python-version: ${{ matrix.python-version }}
-          channels: conda-forge
-      
-      - name: Install GDAL via conda (macOS)
-        if: matrix.platform == 'macos'
-        shell: bash -l {0}
-        run: |
-          conda install -c conda-forge gdal=3.9.3
-          echo "GDAL_INCLUDE_DIR=$CONDA_PREFIX/include" >> $GITHUB_ENV
-          echo "GDAL_LIB_DIR=$CONDA_PREFIX/lib" >> $GITHUB_ENV
-          echo "GDAL_BIN_DIR=$CONDA_PREFIX/bin" >> $GITHUB_ENV
-          echo "$CONDA_PREFIX/lib" >> $GITHUB_PATH
-          echo "$CONDA_PREFIX/bin" >> $GITHUB_PATH
-
-      - name: Install GDAL (Windows)
-        if: matrix.platform == 'windows'
+      - name: Install Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
           python-version: '3.12'
           channels: conda-forge
-          activate-environment: test
 
-      - name: Install GDAL via conda (Windows)
-        if: matrix.platform == 'windows'
+      - name: Install GDAL via conda
         shell: bash -l {0}
         run: |
           conda install -y gdal
@@ -83,30 +44,26 @@ jobs:
           echo "$CONDA_PREFIX/Library/bin" >> $GITHUB_PATH
           echo "$CONDA_PREFIX/Library/lib" >> $GITHUB_PATH
           # Verify gdal_i.lib exists
-          ls -la "$CONDA_PREFIX/Library/lib/" | grep -i gdal
+          ls -la "$CONDA_PREFIX/Library/lib/" | grep -i gdal || echo "gdal_i.lib not found in lib"
+          ls -la "$CONDA_PREFIX/Library/bin/" | grep -i gdal || echo "gdal not found in bin"
 
       - name: Install maturin
         run: pip install maturin
 
-      - name: Build wheels
-        if: matrix.platform != 'windows'
-        run: maturin build --release
-
-      - name: Build wheels (Windows)
-        if: matrix.platform == 'windows'
+      - name: Build wheel
         shell: bash -l {0}
         run: |
           maturin build --release
 
-      - name: Upload wheels
+      - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.platform }}
+          name: wheels-windows
           path: target/wheels/*.whl
 
   publish:
     name: Publish to PyPI
-    needs: [build]
+    needs: [build-windows]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     environment: pypi
@@ -117,9 +74,8 @@ jobs:
       - name: Download wheels
         uses: actions/download-artifact@v4
         with:
-          pattern: wheels-*
+          name: wheels-windows
           path: dist
-          merge-multiple: true
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
