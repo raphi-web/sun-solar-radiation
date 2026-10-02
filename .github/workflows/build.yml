@@ -59,18 +59,10 @@ jobs:
           export GDAL_LIB_DIR="$CONDA_PREFIX/Library/lib"
           export GDAL_INCLUDE_DIR="$CONDA_PREFIX/Library/include"
           
-          # Debug: Find where gdal_i.lib actually is
-          echo "=== Searching for gdal_i.lib ==="
-          find "$CONDA_PREFIX" -name "gdal*.lib" 2>/dev/null || true
-          find "$CONDA_PREFIX" -name "libgdal*" 2>/dev/null || true
-          
-          # Check if the file exists in expected location
-          if [ -f "$GDAL_LIB_DIR/gdal_i.lib" ]; then
-            echo "✓ Found gdal_i.lib in $GDAL_LIB_DIR"
-          else
-            echo "✗ gdal_i.lib NOT found in $GDAL_LIB_DIR"
-            echo "Contents of $GDAL_LIB_DIR:"
-            ls -la "$GDAL_LIB_DIR" | head -20 || true
+          # Create symlink: gdal-sys expects gdal_i.lib but conda provides gdal.lib
+          if [ -f "$GDAL_LIB_DIR/gdal.lib" ] && [ ! -f "$GDAL_LIB_DIR/gdal_i.lib" ]; then
+            echo "Creating symlink: gdal_i.lib -> gdal.lib"
+            cp "$GDAL_LIB_DIR/gdal.lib" "$GDAL_LIB_DIR/gdal_i.lib"
           fi
           
           echo "Building with GDAL from: $GDAL_LIB_DIR"
