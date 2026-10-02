@@ -34,7 +34,7 @@ jobs:
       - name: Install GDAL via conda
         shell: bash -l {0}
         run: |
-          conda install -y gdal
+          conda install -y gdal pkg-config
           # Set GDAL environment variables for Rust gdal-sys
           CONDA_PREFIX=$(conda info --base)/envs/test
           echo "GDAL_HOME=$CONDA_PREFIX/Library" >> $GITHUB_ENV
