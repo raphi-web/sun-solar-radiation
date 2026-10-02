@@ -53,6 +53,13 @@ jobs:
       - name: Build wheel
         shell: bash -l {0}
         run: |
+          # Re-set GDAL env vars for this step
+          CONDA_PREFIX=$(conda info --base)/envs/test
+          export GDAL_HOME="$CONDA_PREFIX/Library"
+          export GDAL_LIB_DIR="$CONDA_PREFIX/Library/lib"
+          export GDAL_INCLUDE_DIR="$CONDA_PREFIX/Library/include"
+          echo "Building with GDAL from: $GDAL_LIB_DIR"
+          ls -la "$GDAL_LIB_DIR" | grep -i gdal || echo "gdal_i.lib not found"
           maturin build --release
 
       - name: Upload wheel
