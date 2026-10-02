@@ -2,7 +2,10 @@
 // useless conversions; silence them crate-wide rather than per-function.
 #![allow(clippy::useless_conversion)]
 
+pub mod arrays;
+#[cfg(feature = "gdal-io")]
 pub mod annual;
+#[cfg(feature = "gdal-io")]
 pub mod gpu;
 pub mod horizon;
 pub mod radiation;
@@ -26,18 +29,24 @@ pub mod shadow;
 pub mod solar;
 pub(crate) mod terrain;
 
+#[cfg(feature = "gdal-io")]
 use gdal::raster::Buffer;
+#[cfg(feature = "gdal-io")]
 use gdal::spatial_ref::{AxisMappingStrategy, CoordTransform, SpatialRef};
+#[cfg(feature = "gdal-io")]
 use gdal::{Dataset, DriverManager};
 use pyo3::prelude::*;
+#[cfg(feature = "gdal-io")]
 use rayon::prelude::*;
+#[cfg(feature = "gdal-io")]
 use std::path::Path;
+#[cfg(feature = "gdal-io")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use radiation::{DailyIrradiation, RadiationParams, integrate_daily};
-use solar::{
-    DEG2RAD, RAD2DEG, com_declin, com_sol_const, compute_slope_geometry, compute_sunrise_sunset,
-};
+use solar::{DEG2RAD, com_declin, com_sol_const, compute_slope_geometry, compute_sunrise_sunset};
+#[cfg(feature = "gdal-io")]
+use solar::RAD2DEG;
 
 /// Nodata sentinel value matching GRASS r.sun convention.
 pub const UNDEFZ: f32 = -9999.0;
@@ -131,6 +140,7 @@ pub fn compute_pixel_irradiation(
 /// to [`UNDEFZ`], so downstream guards (Horn neighborhood check, per-pixel
 /// `elev == UNDEFZ`) catch the input file's actual nodata sentinel rather than
 /// only the hard-coded `-9999`.
+#[cfg(feature = "gdal-io")]
 pub(crate) fn read_elev_normalized(
     ds: &Dataset,
     ncols: usize,
@@ -150,6 +160,7 @@ pub(crate) fn read_elev_normalized(
 }
 
 /// Read a single-band raster as `Vec<f32>`, or fill with `constant` if `path` is `None`.
+#[cfg(feature = "gdal-io")]
 pub(crate) fn read_raster_or_constant(
     path: &Option<String>,
     ncols: usize,
@@ -173,6 +184,7 @@ pub(crate) fn read_raster_or_constant(
 /// `aspect_value=` is fine. If both are absent for a given axis, that axis is
 /// derived from `elev_data` via Horn's 3×3 finite-difference. Output aspect is
 /// always in GRASS convention (0=E CCW), matching the existing raster path.
+#[cfg(feature = "gdal-io")]
 pub(crate) fn resolve_slope_aspect(
     slope_path: &Option<String>,
     slope_value: Option<f64>,
@@ -212,6 +224,7 @@ pub(crate) fn resolve_slope_aspect(
 /// reproject to EPSG:4326. Latitude varies primarily with the raster's Y axis
 /// within typical tile sizes, so a single per-row sample is accurate enough
 /// while keeping the reprojection cost at O(nrows) rather than O(npixels).
+#[cfg(feature = "gdal-io")]
 pub(crate) fn compute_row_latitudes(ds: &Dataset) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
     let (ncols, nrows) = ds.raster_size();
     let gt = ds.geo_transform()?;
@@ -241,6 +254,7 @@ pub(crate) fn compute_row_latitudes(ds: &Dataset) -> Result<Vec<f64>, Box<dyn st
 }
 
 /// Write a `Vec<f32>` as a single-band Float32 GeoTIFF with nodata = `UNDEFZ`.
+#[cfg(feature = "gdal-io")]
 pub(crate) fn write_raster(
     driver: &gdal::Driver,
     path: &str,
@@ -264,6 +278,7 @@ pub(crate) fn write_raster(
 ///
 /// Location: 14.0–15.0°E, 47.0–48.0°N (0.01°/pixel ≈ 1 km).
 /// Elevation: synthetic alpine terrain, 520–1080 m.
+#[cfg(feature = "gdal-io")]
 pub fn create_dummy_elevation(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     use std::f64::consts::PI;
 
@@ -305,6 +320,7 @@ pub fn create_dummy_elevation(path: &str) -> Result<(), Box<dyn std::error::Erro
 /// When `mask_path` is provided, pixels with mask value 0 (false) are skipped
 /// and written as UNDEFZ; all non-zero mask values are treated as true.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "gdal-io")]
 pub fn run_raster_computation(
     elev_path: &str,
     slope_path: &Option<String>,
@@ -712,6 +728,7 @@ fn compute_pixel(
 ///     Defaults to False.
 /// quiet : bool, optional
 ///     If True, suppress all progress/info messages on stderr. Defaults to False.
+#[cfg(feature = "gdal-io")]
 #[pyfunction]
 #[pyo3(signature = (elevation, day, *, slope=None, aspect=None, linke=None, albedo=None,
                     mask=None,
@@ -853,6 +870,7 @@ fn compute_raster(
 ///     DSMs with sharp building edges if needed.
 /// quiet : bool
 ///     Suppress progress messages on stderr.
+#[cfg(feature = "gdal-io")]
 #[pyfunction]
 #[pyo3(signature = (elevation, out_path, *, slope=None, aspect=None, linke=None, albedo=None,
                     mask=None,
@@ -946,10 +964,459 @@ fn compute_annual_potential(
 /// ----------
 /// path : str
 ///     Output GeoTIFF path
+#[cfg(feature = "gdal-io")]
 #[pyfunction]
 fn create_dummy(path: &str) -> PyResult<()> {
     create_dummy_elevation(path)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+}
+
+// ── Array API (no GDAL — I/O happens in Python) ─────────────────────────────
+//
+// Python reads the rasters (tiled, see the plugin's raster_io.py) and passes
+// flat f32 numpy arrays; these functions compute one row band and hand back
+// numpy arrays that Python writes to GeoTIFF. Because the extension never
+// opens a file, it has no GDAL dependency and builds on any platform.
+
+use arrays::{BandInputs, DailyWants};
+use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
+
+/// Borrow a numpy array as `&[f32]`, validating contiguity and length.
+///
+/// The returned slice borrows from the `PyReadonlyArray` handle — callers
+/// must keep the handle alive for as long as the slice is used (it is NOT
+/// valid for the whole `'py` lifetime).
+fn slice_of<'a>(
+    arr: &'a PyReadonlyArray1<'a, f32>,
+    expected: usize,
+    name: &str,
+) -> PyResult<&'a [f32]> {
+    let s = arr.as_slice().map_err(|_| {
+        pyo3::exceptions::PyValueError::new_err(format!(
+            "{name} must be a contiguous float32 array (got a non-contiguous \
+             or wrongly-typed ndarray; use np.ascontiguousarray(x, dtype=np.float32))"
+        ))
+    })?;
+    if s.len() != expected {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{name} has {} elements, expected {expected}",
+            s.len()
+        )));
+    }
+    Ok(s)
+}
+
+/// Resolve an optional raster input: borrow the caller's array, or fill a
+/// band-sized constant buffer when absent. The `Some(handle)` variant keeps
+/// the numpy handle alive so the borrowed slice stays valid.
+fn resolve_input<'a>(
+    arr: Option<PyReadonlyArray1<'a, f32>>,
+    fill: f32,
+    npixels: usize,
+    name: &str,
+) -> PyResult<(Option<PyReadonlyArray1<'a, f32>>, Vec<f32>)> {
+    match arr {
+        Some(a) => {
+            slice_of(&a, npixels, name)?;
+            Ok((Some(a), Vec::new()))
+        }
+        None => Ok((None, vec![fill; npixels])),
+    }
+}
+
+/// Effective slice for an optional input: the borrowed array or the fill-in.
+fn input_slice<'a, 'b>(
+    owned: &'b Option<PyReadonlyArray1<'a, f32>>,
+    fallback: &'b [f32],
+) -> &'b [f32] {
+    match owned {
+        // Safety of lifetime: slice_of validated length; as_slice borrows the
+        // handle which lives in `owned` for 'b.
+        Some(a) => a.as_slice().unwrap_or(fallback),
+        None => fallback,
+    }
+}
+
+/// Compute daily irradiation for ONE row band from numpy arrays (no file I/O).
+///
+/// Parameters
+/// ----------
+/// elevation : ndarray[float32]
+///     Flat band elevation, length ncols*nrows. Nodata/NaN must already be
+///     normalized to -9999 by the caller.
+/// ncols, nrows : int
+///     Band geometry.
+/// row_lat : ndarray[float32]
+///     Pixel-centre latitude [deg] per band row, length nrows.
+/// day : int
+///     Day of year 1-365.
+/// step : float
+///     Sub-daily integration step [hours].
+/// linke_value, albedo_value : float
+///     Constant fallbacks used when the matching raster array is None.
+/// dx_m, dy_m : float
+///     Pixel size along X / Y in map units (used by the shadow ray-march).
+/// slope, aspect, linke, albedo, mask : ndarray[float32], optional
+///     Flat band-sized arrays. `slope`/`aspect` are DERIVED from the DEM via
+///     Horn's 3×3 when omitted; linke/albedo fall back to the scalar values;
+///     mask defaults to all-compute.
+/// shadow_context_elev : ndarray[float32], optional
+///     FULL-grid flat elevation (ncols * full_nrows) used as the cast-shadow
+///     context. Omit only when the band IS the whole grid.
+/// row_offset : int
+///     This band's first row in the full grid.
+/// full_nrows : int
+///     Total rows in the full grid.
+/// outputs : list[str]
+///     Any of "beam", "diff", "refl", "glob", "insol".
+/// gpu : bool
+///     Reserved for the WebGPU band path; currently CPU-only.
+///
+/// Returns
+/// -------
+/// dict[str, ndarray[float32]]
+///     One entry per requested output, each flat of length ncols*nrows, with
+///     skipped pixels set to -9999.
+#[pyfunction]
+#[pyo3(signature = (elevation, ncols, nrows, row_lat, day, *, step=0.5,
+                    linke_value=3.0, albedo_value=0.2, solar_constant=1367.0,
+                    dx_m=1.0, dy_m=1.0,
+                    slope=None, aspect=None, linke=None, albedo=None, mask=None,
+                    shadow_context_elev=None, row_offset=0, full_nrows=0,
+                    outputs=None, gpu=false, quiet=true))]
+#[allow(clippy::too_many_arguments)]
+fn compute_raster_bands<'py>(
+    py: Python<'py>,
+    elevation: PyReadonlyArray1<'py, f32>,
+    ncols: usize,
+    nrows: usize,
+    row_lat: PyReadonlyArray1<'py, f32>,
+    day: i32,
+    step: f64,
+    linke_value: f64,
+    albedo_value: f64,
+    solar_constant: f64,
+    dx_m: f64,
+    dy_m: f64,
+    slope: Option<PyReadonlyArray1<'py, f32>>,
+    aspect: Option<PyReadonlyArray1<'py, f32>>,
+    linke: Option<PyReadonlyArray1<'py, f32>>,
+    albedo: Option<PyReadonlyArray1<'py, f32>>,
+    mask: Option<PyReadonlyArray1<'py, f32>>,
+    shadow_context_elev: Option<PyReadonlyArray1<'py, f32>>,
+    row_offset: usize,
+    full_nrows: usize,
+    outputs: Option<Vec<String>>,
+    gpu: bool,
+    quiet: bool,
+) -> PyResult<std::collections::HashMap<String, Bound<'py, PyArray1<f32>>>> {
+    if gpu {
+        return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "gpu=True is not yet available on the array API; pass gpu=False \
+             (the QGIS plugin falls back to the CPU path automatically)",
+        ));
+    }
+
+    let npixels = ncols.checked_mul(nrows).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err("ncols*nrows overflows")
+    })?;
+    let full_nrows = if full_nrows == 0 { nrows } else { full_nrows };
+
+    // Parse the output selection BEFORE doing any heavy work so a typo fails fast.
+    let requested = outputs.unwrap_or_else(|| vec!["glob".to_string()]);
+    if requested.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "outputs must contain at least one of beam/diff/refl/glob/insol",
+        ));
+    }
+    let mut wants = DailyWants::default();
+    for name in &requested {
+        match name.as_str() {
+            "beam" => wants.beam = true,
+            "diff" => wants.diffuse = true,
+            "refl" => wants.reflected = true,
+            "glob" => wants.global = true,
+            "insol" => wants.insol = true,
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unknown output {other:?}; expected one of beam, diff, refl, glob, insol"
+                )))
+            }
+        }
+    }
+    if !wants.beam && !wants.diffuse && !wants.reflected && !wants.global && !wants.insol {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "no valid output selected",
+        ));
+    }
+
+    let elev = slice_of(&elevation, npixels, "elevation")?;
+    let lats = slice_of(&row_lat, nrows, "row_lat")?;
+
+    // slope/aspect: caller array > derive-from-DEM (never a constant fill).
+    let derived = if slope.is_none() || aspect.is_none() {
+        Some(py.allow_threads(|| {
+            arrays::slope_aspect_from_elev(elev, ncols, nrows, dx_m, dy_m)
+        }))
+    } else {
+        None
+    };
+
+    let (slope_h, slope_fill) = resolve_input(slope, UNDEFZ, npixels, "slope")?;
+    let (aspect_h, aspect_fill) = resolve_input(aspect, UNDEFZ, npixels, "aspect")?;
+    let slope_s: &[f32] = match (&slope_h, &derived) {
+        (Some(h), _) => h.as_slice().unwrap_or(&slope_fill),
+        (None, Some((d, _))) => d,
+        (None, None) => unreachable!(),
+    };
+    let aspect_s: &[f32] = match (&aspect_h, &derived) {
+        (Some(h), _) => h.as_slice().unwrap_or(&aspect_fill),
+        (None, Some((_, d))) => d,
+        (None, None) => unreachable!(),
+    };
+
+    let (linke_h, linke_fill) = resolve_input(linke, linke_value as f32, npixels, "linke")?;
+    let (albedo_h, albedo_fill) = resolve_input(albedo, albedo_value as f32, npixels, "albedo")?;
+    let (mask_h, mask_fill) = resolve_input(mask, 1.0, npixels, "mask")?;
+    let linke_s = input_slice(&linke_h, &linke_fill);
+    let albedo_s = input_slice(&albedo_h, &albedo_fill);
+    let mask_s = input_slice(&mask_h, &mask_fill);
+
+    // Shadow context defaults to the band itself (single-band runs).
+    let shadow_s: &[f32] = match &shadow_context_elev {
+        Some(a) => slice_of(a, ncols * full_nrows, "shadow_context_elev")?,
+        None => elev,
+    };
+
+    let inp = BandInputs {
+        elevation: elev,
+        slope: slope_s,
+        aspect: aspect_s,
+        linke: linke_s,
+        albedo: albedo_s,
+        mask: mask_s,
+        row_lat_deg: lats,
+        shadow_elev: shadow_s,
+        ncols,
+        nrows,
+        row_offset,
+        full_nrows,
+        dx: dx_m,
+        dy: dy_m,
+    };
+    inp.validate().map_err(pyo3::exceptions::PyValueError::new_err)?;
+
+    // The heavy loop runs with the GIL released so the embedding GUI stays
+    // responsive and progress reports can be parsed concurrently.
+    let out = py
+        .allow_threads(|| arrays::compute_daily_band_cpu(&inp, day, step, solar_constant, wants, quiet))
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+
+    let mut result = std::collections::HashMap::new();
+    if let Some(v) = out.beam {
+        result.insert("beam".to_string(), v.into_pyarray_bound(py));
+    }
+    if let Some(v) = out.diffuse {
+        result.insert("diff".to_string(), v.into_pyarray_bound(py));
+    }
+    if let Some(v) = out.reflected {
+        result.insert("refl".to_string(), v.into_pyarray_bound(py));
+    }
+    if let Some(v) = out.global {
+        result.insert("glob".to_string(), v.into_pyarray_bound(py));
+    }
+    if let Some(v) = out.insol {
+        result.insert("insol".to_string(), v.into_pyarray_bound(py));
+    }
+    Ok(result)
+}
+
+/// Compute annual PV potential [kWh/m²/yr] for ONE row band from numpy arrays.
+///
+/// Same array/geometry semantics as [`compute_raster_bands`]; returns a single
+/// flat float32 array of length ncols*nrows (nodata = -9999).
+#[pyfunction]
+#[pyo3(signature = (elevation, ncols, nrows, row_lat, *, day_start=1, day_end=365, day_step=10,
+                    step=0.5, solar_constant=1367.0, panel_efficiency=1.0,
+                    linke_value=3.0, albedo_value=0.2, dx_m=1.0, dy_m=1.0,
+                    slope=None, aspect=None, linke=None, albedo=None, mask=None,
+                    shadow_context_elev=None, row_offset=0, full_nrows=0,
+                    gpu=false, use_horizon=false, horizon_n_az=64, quiet=true))]
+#[allow(clippy::too_many_arguments)]
+fn compute_annual_bands<'py>(
+    py: Python<'py>,
+    elevation: PyReadonlyArray1<'py, f32>,
+    ncols: usize,
+    nrows: usize,
+    row_lat: PyReadonlyArray1<'py, f32>,
+    day_start: i32,
+    day_end: i32,
+    day_step: i32,
+    step: f64,
+    solar_constant: f64,
+    panel_efficiency: f64,
+    linke_value: f64,
+    albedo_value: f64,
+    dx_m: f64,
+    dy_m: f64,
+    slope: Option<PyReadonlyArray1<'py, f32>>,
+    aspect: Option<PyReadonlyArray1<'py, f32>>,
+    linke: Option<PyReadonlyArray1<'py, f32>>,
+    albedo: Option<PyReadonlyArray1<'py, f32>>,
+    mask: Option<PyReadonlyArray1<'py, f32>>,
+    shadow_context_elev: Option<PyReadonlyArray1<'py, f32>>,
+    row_offset: usize,
+    full_nrows: usize,
+    gpu: bool,
+    use_horizon: bool,
+    horizon_n_az: usize,
+    quiet: bool,
+) -> PyResult<Bound<'py, PyArray1<f32>>> {
+    if gpu {
+        return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "gpu=True is not yet available on the array API; pass gpu=False",
+        ));
+    }
+    if day_step <= 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "day_step must be positive",
+        ));
+    }
+    if !(1..=365).contains(&day_start) || !(1..=365).contains(&day_end) || day_end < day_start {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "day_start/day_end must lie in 1..=365 with day_end >= day_start",
+        ));
+    }
+    if use_horizon && horizon_n_az < 4 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "horizon_n_az must be >= 4 when use_horizon=true",
+        ));
+    }
+
+    let npixels = ncols.checked_mul(nrows).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err("ncols*nrows overflows")
+    })?;
+    let full_nrows = if full_nrows == 0 { nrows } else { full_nrows };
+    let days: Vec<i32> = (day_start..=day_end).step_by(day_step as usize).collect();
+
+    let elev = slice_of(&elevation, npixels, "elevation")?;
+    let lats = slice_of(&row_lat, nrows, "row_lat")?;
+
+    let derived = if slope.is_none() || aspect.is_none() {
+        Some(py.allow_threads(|| {
+            arrays::slope_aspect_from_elev(elev, ncols, nrows, dx_m, dy_m)
+        }))
+    } else {
+        None
+    };
+
+    let (slope_h, slope_fill) = resolve_input(slope, UNDEFZ, npixels, "slope")?;
+    let (aspect_h, aspect_fill) = resolve_input(aspect, UNDEFZ, npixels, "aspect")?;
+    let slope_s: &[f32] = match (&slope_h, &derived) {
+        (Some(h), _) => h.as_slice().unwrap_or(&slope_fill),
+        (None, Some((d, _))) => d,
+        (None, None) => unreachable!(),
+    };
+    let aspect_s: &[f32] = match (&aspect_h, &derived) {
+        (Some(h), _) => h.as_slice().unwrap_or(&aspect_fill),
+        (None, Some((_, d))) => d,
+        (None, None) => unreachable!(),
+    };
+
+    let (linke_h, linke_fill) = resolve_input(linke, linke_value as f32, npixels, "linke")?;
+    let (albedo_h, albedo_fill) = resolve_input(albedo, albedo_value as f32, npixels, "albedo")?;
+    let (mask_h, mask_fill) = resolve_input(mask, 1.0, npixels, "mask")?;
+    let linke_s = input_slice(&linke_h, &linke_fill);
+    let albedo_s = input_slice(&albedo_h, &albedo_fill);
+    let mask_s = input_slice(&mask_h, &mask_fill);
+    let shadow_s: &[f32] = match &shadow_context_elev {
+        Some(a) => slice_of(a, ncols * full_nrows, "shadow_context_elev")?,
+        None => elev,
+    };
+
+    let inp = BandInputs {
+        elevation: elev,
+        slope: slope_s,
+        aspect: aspect_s,
+        linke: linke_s,
+        albedo: albedo_s,
+        mask: mask_s,
+        row_lat_deg: lats,
+        shadow_elev: shadow_s,
+        ncols,
+        nrows,
+        row_offset,
+        full_nrows,
+        dx: dx_m,
+        dy: dy_m,
+    };
+    inp.validate().map_err(pyo3::exceptions::PyValueError::new_err)?;
+
+    // Horizon precompute spans the FULL grid, so it is only valid when this
+    // call covers the whole raster; otherwise the per-pixel ray-march (which
+    // already indexes the full grid via shadow_context_elev) is used.
+    let horizon_map = if use_horizon && row_offset == 0 && nrows == full_nrows {
+        Some(py.allow_threads(|| {
+            crate::horizon::compute_horizon_map_cpu(
+                shadow_s,
+                ncols,
+                full_nrows,
+                dx_m,
+                dy_m,
+                mask_s,
+                horizon_n_az,
+                quiet,
+            )
+        }))
+    } else {
+        None
+    };
+
+    let potential = py
+        .allow_threads(|| {
+            arrays::compute_annual_band_cpu(
+                &inp,
+                &days,
+                day_step,
+                step,
+                solar_constant,
+                panel_efficiency,
+                horizon_map.as_ref(),
+                quiet,
+            )
+        })
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+
+    Ok(potential.into_pyarray_bound(py))
+}
+
+/// Derive slope [deg] and aspect [deg, GRASS CCW-from-East] from a flat f32
+/// elevation band via Horn's 3×3 finite difference.
+///
+/// Returns `(slope, aspect)` as flat float32 arrays of length ncols*nrows.
+/// The band's edge ring, and any pixel whose 3×3 neighbourhood touches
+/// nodata, is emitted as -9999.
+#[pyfunction]
+#[pyo3(signature = (elevation, ncols, nrows, *, dx_m=1.0, dy_m=1.0))]
+fn horn_slope_aspect<'py>(
+    py: Python<'py>,
+    elevation: PyReadonlyArray1<'py, f32>,
+    ncols: usize,
+    nrows: usize,
+    dx_m: f64,
+    dy_m: f64,
+) -> PyResult<(Bound<'py, PyArray1<f32>>, Bound<'py, PyArray1<f32>>)> {
+    let npixels = ncols.checked_mul(nrows).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err("ncols*nrows overflows")
+    })?;
+    let elev = slice_of(&elevation, npixels, "elevation")?;
+    let (slope, aspect) = py.allow_threads(|| {
+        arrays::slope_aspect_from_elev(elev, ncols, nrows, dx_m, dy_m)
+    });
+    Ok((
+        slope.into_pyarray_bound(py),
+        aspect.into_pyarray_bound(py),
+    ))
 }
 
 /// r.sun solar irradiation model — Python bindings
@@ -970,8 +1437,15 @@ fn create_dummy(path: &str) -> PyResult<()> {
 fn sun(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<IrradiationResult>()?;
     m.add_function(wrap_pyfunction!(compute_pixel, m)?)?;
-    m.add_function(wrap_pyfunction!(compute_raster, m)?)?;
-    m.add_function(wrap_pyfunction!(compute_annual_potential, m)?)?;
-    m.add_function(wrap_pyfunction!(create_dummy, m)?)?;
+    #[cfg(feature = "gdal-io")]
+    {
+        m.add_function(wrap_pyfunction!(compute_raster, m)?)?;
+        m.add_function(wrap_pyfunction!(compute_annual_potential, m)?)?;
+        m.add_function(wrap_pyfunction!(create_dummy, m)?)?;
+    }
+    // Array API (no GDAL): band-in / band-out, I/O lives in Python.
+    m.add_function(wrap_pyfunction!(compute_raster_bands, m)?)?;
+    m.add_function(wrap_pyfunction!(compute_annual_bands, m)?)?;
+    m.add_function(wrap_pyfunction!(horn_slope_aspect, m)?)?;
     Ok(())
 }

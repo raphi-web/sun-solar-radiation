@@ -13,11 +13,21 @@ crate-type = ["cdylib", "rlib"]
 [[bin]]
 name = "sun"
 path = "src/main.rs"
+required-features = ["gdal-io"]
+
+[features]
+default = []
+# Path-based raster I/O (GeoTIFF in/out) for the `sun` CLI binary and the
+# legacy path-based PyO3 functions. The Python extension for the QGIS plugin
+# builds WITHOUT this feature: raster I/O happens in Python, so the .so has
+# no GDAL linkage and builds on any platform.
+gdal-io = ["dep:gdal", "dep:clap"]
 
 [dependencies]
-gdal = { version = "0.17", features = ["bindgen"] }
-clap = { version = "4", features = ["derive"] }
+gdal = { version = "0.17", features = ["bindgen"], optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
 pyo3 = { version = "0.22", features = ["extension-module"] }
+numpy = "0.22"
 wgpu = "22"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.3"
