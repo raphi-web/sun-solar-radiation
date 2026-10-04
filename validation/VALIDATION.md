@@ -20,7 +20,8 @@ default (1367).
 
 Reproduce: `make_test_dem.py`, then `grass_reference.sh` (needs GRASS 8),
 then `compare_sun_grass.py`, `compare_tilted_plane.py`,
-`compare_wall_shadow.py`.
+`compare_wall_shadow.py`. `make_figures.py` regenerates `maps.png` and
+`wall_profile.png` with the installed engine.
 
 ## Results
 
