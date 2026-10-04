@@ -2,15 +2,12 @@
 """Controlled wall-shadow geometry: how far north does each engine's winter
 shadow reach? Wall at row 150 (1000 m tall), sun due south => shadow to the
 north (rows < 150). Compare the shadow footprint of sun vs r.sun."""
-import importlib.util, sys
-from pathlib import Path
 import numpy as np
 from osgeo import gdal, osr
+
+import sun  # pip install sun-solar-radiation (or this repo via maturin)
+
 gdal.UseExceptions()
-pkg=Path("/home/raphi/Dokumente/Programming/Python/sun_qgis-plugin/sun_qgis")
-spec=importlib.util.spec_from_file_location("sun_core",str(pkg/"core.py"))
-core=importlib.util.module_from_spec(spec); sys.modules["sun_core"]=core; spec.loader.exec_module(core)
-sun=core.load_sun(pkg)
 def read(p):
     ds=gdal.Open(p); a=ds.GetRasterBand(1).ReadAsArray().astype(np.float64); ds=None; return a
 ds=gdal.Open("/tmp/sun_vs_grass/wall.tif"); gt=ds.GetGeoTransform(); wkt=ds.GetProjection()

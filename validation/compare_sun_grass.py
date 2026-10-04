@@ -1,18 +1,12 @@
 
 """sun (array API, CPU + GPU) vs GRASS r.sun on the same DEM & parameters."""
-import importlib.util, sys, time
-from pathlib import Path
+import time
 import numpy as np
 from osgeo import gdal
 
-gdal.UseExceptions()
+import sun  # pip install sun-solar-radiation (or this repo via maturin)
 
-# load the extension from the plugin dir
-pkg = Path("/home/raphi/Dokumente/Programming/Python/sun_qgis-plugin/sun_qgis")
-spec = importlib.util.spec_from_file_location("sun_core", str(pkg / "core.py"))
-core = importlib.util.module_from_spec(spec); sys.modules["sun_core"] = core
-spec.loader.exec_module(core)
-sun = core.load_sun(pkg)
+gdal.UseExceptions()
 
 def read(path):
     ds = gdal.Open(path)

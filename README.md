@@ -181,8 +181,10 @@ integrated graphics by a further factor. The CPU path uses all cores.
 ## QGIS plugin
 
 A ready-made QGIS plugin (dialog, layer pickers, progress bar, tiled I/O on
-top of this engine) lives in the `sun_qgis-plugin` repository and ships the
-same extension.
+top of this engine) lives in the
+[`sun_qgis-plugin`](https://github.com/raphi-web/sun_qgis-plugin) repository.
+It uses this package: install `sun-solar-radiation` into QGIS's Python, then
+the plugin from its release zip.
 
 ## Model
 

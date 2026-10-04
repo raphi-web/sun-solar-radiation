@@ -2,17 +2,12 @@
 """Ramp test: south-facing plane, aspect from GRASS's OWN raster (both engines
 read the identical raster). This is the apples-to-apples tilted-plane test —
 the scalar aspect_value convention difference does not apply here."""
-import importlib.util, sys
-from pathlib import Path
 import numpy as np
 from osgeo import gdal, osr
-gdal.UseExceptions()
 
-pkg = Path("/home/raphi/Dokumente/Programming/Python/sun_qgis-plugin/sun_qgis")
-spec = importlib.util.spec_from_file_location("sun_core", str(pkg / "core.py"))
-core = importlib.util.module_from_spec(spec); sys.modules["sun_core"] = core
-spec.loader.exec_module(core)
-sun = core.load_sun(pkg)
+import sun  # pip install sun-solar-radiation (or this repo via maturin)
+
+gdal.UseExceptions()
 
 def read(p):
     ds = gdal.Open(p); a = ds.GetRasterBand(1).ReadAsArray().astype(np.float64); ds=None; return a
