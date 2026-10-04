@@ -8,7 +8,7 @@ model as a native Python extension with an optional WebGPU compute path.
 - **Annual PV potential**: kWh/m²/year for a sampled day grid, with panel efficiency
 - **Full terrain physics**: cast-shadow ray-marching across the whole DEM, slope/aspect incidence, Linke turbidity, ground albedo
 - **Big-raster friendly**: the array API processes row bands, so Python callers can stream rasters larger than RAM
-- **GPU when available, CPU always**: measured 5–17× speedup on integrated graphics; the CPU path is rayon-parallel
+- **GPU when available, CPU always**: measured 8–24× speedup on integrated graphics; the CPU path is rayon-parallel
 
 ## Validation at a glance
 
@@ -169,11 +169,11 @@ day 172, 0.5 h step, global output:
 
 | Grid      | Mode                     | CPU    | GPU    | Speedup |
 |-----------|--------------------------|--------|--------|---------|
-| 500×500   | daily                    | 0.7 s  | 0.13 s | 5.6×    |
-| 500×500   | annual (37 sampled days) | 24 s   | 1.4 s  | 17×     |
-| 1000×1000 | daily                    | 2.9 s  | 0.34 s | 8.8×    |
-| 1000×1000 | annual (37 sampled days) | 99 s   | 6.3 s  | 16×     |
-| 2000×2000 | daily                    | 12.3 s | 1.4 s  | 8.9×    |
+| 500×500   | daily                    | 0.9 s  | 0.12 s | 7.9×    |
+| 500×500   | annual (37 sampled days) | 30 s   | 1.3 s  | 24×     |
+| 1000×1000 | daily                    | 3.9 s  | 0.32 s | 12×     |
+| 1000×1000 | annual (37 sampled days) | 123 s  | 5.5 s  | 22×     |
+| 2000×2000 | daily                    | 16.5 s | 1.3 s  | 13×     |
 
 GPU numbers will vary strongly with the adapter; a discrete GPU beats
 integrated graphics by a further factor. The CPU path uses all cores.
