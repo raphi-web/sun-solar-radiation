@@ -36,3 +36,17 @@ v = elev[elev > -9000]
 print(f"DEM written: {path}")
 print(f"  {ncols}x{nrows} @ {px:.0f} m, EPSG:32633")
 print(f"  elev {v.min():.0f}..{v.max():.0f} m, mean {v.mean():.0f} m")
+
+# Controlled shadow geometry: flat 500 m plain + one 1000 m E-W wall at
+# row 150 (cols 20-179), same grid and georeference as dem.tif.
+wall = np.full((nrows, ncols), 500.0, dtype=np.float32)
+wall[150, 20:180] = 1500.0
+wpath = "/tmp/sun_vs_grass/wall.tif"
+ds = drv.Create(wpath, ncols, nrows, 1, gdal.GDT_Float32)
+ds.SetGeoTransform((400000.0, px, 0.0, 5250000.0, 0.0, -px))
+ds.SetProjection(srs.ExportToWkt())
+band = ds.GetRasterBand(1)
+band.SetNoDataValue(-9999.0)
+band.WriteArray(wall)
+ds = band = None
+print(f"wall written: {wpath} (1000 m wall at row 150)")

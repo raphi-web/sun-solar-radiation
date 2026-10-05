@@ -61,7 +61,7 @@ def compare(name, mine, grass):
     diff = mm - gg
     rel = np.abs(diff) / np.maximum(np.abs(gg), 1.0)
     corr = np.corrcoef(mm, gg)[0,1]
-    return dict(name=name, n=valid.sum(),
+    return dict(name=name, n=int(valid.sum()),
                 nodata_agree=float((nodata_m == nodata_g).mean()),
                 bias=float(diff.mean()), rmse=float(np.sqrt((diff**2).mean())),
                 mean_abs_rel=float(rel.mean()), p95_rel=float(np.percentile(rel,95)),

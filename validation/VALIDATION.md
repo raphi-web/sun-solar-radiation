@@ -10,7 +10,7 @@ default (1367).
 - `make_test_dem.py` → synthetic alpine terrain, 200×200 px @ 30 m,
   EPSG:32633 (UTM 33N, ~Salzburg), 596–1833 m, ridges/valleys so cast
   shadows occur; nodata border column.
-- `wall.tif` → controlled geometry: flat 500 m plain + one 1000 m E–W wall
+- `wall.tif` (also written by `make_test_dem.py`) → controlled geometry: flat 500 m plain + one 1000 m E–W wall
   at row 150. Analytic winter-solstice shadow length at lat 47.37°N:
   1000 m / tan(19.2°) ≈ 2873 m ≈ 96 px north of the wall.
 - Slope/aspect for both engines come from **GRASS's own `r.slope.aspect`
@@ -22,6 +22,12 @@ Reproduce: `make_test_dem.py`, then `grass_reference.sh` (needs GRASS 8),
 then `compare_sun_grass.py`, `compare_tilted_plane.py`,
 `compare_wall_shadow.py`. `make_figures.py` regenerates `maps.png` and
 `wall_profile.png` with the installed engine.
+
+Last full re-run: engine 0.1.2 (GPU work split into short submissions),
+rebuilt from scratch with the steps above. Every number in §1–§5 reproduced
+unchanged on both CPU and GPU (e.g. rough terrain day 355 shadows on: CPU
+1573.4, GPU 1573.5 vs GRASS 1717.9; ramp −0.00%, corr 1.00000; wall deep
+shadow 435 Wh/m²/day in both engines).
 
 ## Results
 
