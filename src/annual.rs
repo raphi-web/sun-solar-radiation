@@ -44,10 +44,9 @@ struct Uniforms {
     // 0 → fall back to the per-call ray-march. >0 → use the horizon-lookup
     // path with this many azimuth bins (matches the CPU side).
     n_az: u32,
-    // Pad to 64 bytes — WGSL uniform structs round up to 16-byte alignment.
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
+    pixel_start: u32, // window start inside the tile (see gpu_array)
+    pixel_count: u32, // window length; 0 = whole tile
+    _pad2: u32,       // pad to 64 bytes (WGSL uniform alignment)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -233,8 +232,6 @@ async fn compute_annual_potential_gpu_async(
 
     let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
     let step_rad = (step * std::f64::consts::PI / 12.0) as f32;
-    let workgroup_size = 64u32;
-    let max_dim = 65535u32;
 
     // ── Tile sizing — same row-banding strategy as gpu.rs ────────────────────
     let bytes_per_row = (ncols * std::mem::size_of::<f32>()) as u64;
@@ -348,6 +345,7 @@ async fn compute_annual_potential_gpu_async(
 
     let mut row_start = 0usize;
     let mut tile_idx = 0usize;
+    let mut chunker = crate::gpu_array::Chunker::new();
     while row_start < nrows {
         let row_end = (row_start + tile_rows).min(nrows);
         let tile_h = row_end - row_start;
@@ -355,16 +353,10 @@ async fn compute_annual_potential_gpu_async(
         let tile_byte_size = (tile_pixels * std::mem::size_of::<f32>()) as u64;
         let pixel_offset = row_start * ncols;
         let pixel_range = pixel_offset..pixel_offset + tile_pixels;
-
-        let total_workgroups = (tile_pixels as u32).div_ceil(workgroup_size);
-        let (num_workgroups_x, num_workgroups_y) = if total_workgroups <= max_dim {
-            (total_workgroups, 1u32)
-        } else {
-            let x = max_dim;
-            let y = total_workgroups.div_ceil(x);
-            (x, y)
-        };
-        let dispatch_x_pixels = num_workgroups_x * workgroup_size;
+        chunker.begin_tile(crate::gpu_array::group_weights(tile_pixels, |i| {
+            let j = pixel_offset + i;
+            crate::gpu_array::pixel_computed(elev_data[j], slope_data[j], aspect_data[j], mask_data[j])
+        }));
 
         // ── Per-tile buffers (created once; reused across all days) ─────────
         let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -503,8 +495,7 @@ async fn compute_annual_potential_gpu_async(
 
         if !quiet {
             eprintln!(
-                "GPU annual  Tile {tile_idx}: rows {row_start}..{row_end}, dispatch \
-                 {num_workgroups_x}×{num_workgroups_y} workgroups × {} days",
+                "GPU annual  Tile {tile_idx}: rows {row_start}..{row_end} × {} days",
                 days.len()
             );
         }
@@ -518,31 +509,40 @@ async fn compute_annual_potential_gpu_async(
                 step_rad,
                 ncols: ncols as u32,
                 nrows: tile_h as u32,
-                dispatch_x_pixels,
+                dispatch_x_pixels: 0,
                 full_nrows: nrows as u32,
                 row_offset: row_start as u32,
                 max_z,
                 dx,
                 dy,
                 n_az: n_az_u32,
-                _pad0: 0,
-                _pad1: 0,
+                pixel_start: 0,
+                pixel_count: 0,
                 _pad2: 0,
             };
-            queue.write_buffer(&uniform_buf, 0, bytemuck::bytes_of(&uniforms));
+            let mut write = |pixel_start: u32, pixel_count: u32, dispatch_x_pixels: u32| {
+                let u = Uniforms {
+                    dispatch_x_pixels,
+                    pixel_start,
+                    pixel_count,
+                    ..uniforms
+                };
+                queue.write_buffer(&uniform_buf, 0, bytemuck::bytes_of(&u));
+            };
+            crate::gpu_array::dispatch_in_windows(
+                &device,
+                &queue,
+                &pipeline,
+                &bind_group,
+                &mut chunker,
+                tile_pixels,
+                &mut write,
+                &|| Ok(()),
+            )?;
 
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("annual_encoder"),
+                label: Some("annual_readback"),
             });
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("r.sun annual pass"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&pipeline);
-                pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups(num_workgroups_x, num_workgroups_y, 1);
-            }
             encoder.copy_buffer_to_buffer(&buf_out_glob, 0, &stage_glob, 0, tile_byte_size);
             queue.submit(std::iter::once(encoder.finish()));
 

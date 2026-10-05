@@ -34,8 +34,12 @@ struct Uniforms {
     dy:          f32,   // pixel y size [m]
     // 0 → ray-march each shadow test; >0 → look up horizon[idx * n_az + bin].
     n_az:        u32,
-    _pad0:       u32,
-    _pad1:       u32,
+    // Optional pixel window inside this tile: when pixel_count > 0 only
+    // pixels [pixel_start, pixel_start + pixel_count) are computed. Lets the
+    // host split a tile into short GPU submissions (driver watchdogs kill
+    // long ones). 0 = whole tile (CLI paths leave it 0).
+    pixel_start: u32,
+    pixel_count: u32,
     _pad2:       u32,
 }
 
@@ -386,7 +390,11 @@ fn ray_blocked(full_row: u32, col: u32, eye_z: f32,
 
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx   = gid.y * u.dispatch_x_pixels + gid.x;
+    var idx = gid.y * u.dispatch_x_pixels + gid.x;
+    if u.pixel_count != 0u {
+        if idx >= u.pixel_count { return; }
+        idx = idx + u.pixel_start;
+    }
     let total = u.ncols * u.nrows;
     if idx >= total { return; }
 

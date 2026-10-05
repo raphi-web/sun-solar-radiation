@@ -1,6 +1,6 @@
 [package]
 name = "sun"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 
 [lints.rust]
@@ -41,7 +41,10 @@ rpath = false
 lto = true
 debug-assertions = false
 codegen-units = 1
-panic = "abort"
+# unwind, not abort: this library runs inside host processes (QGIS, Python).
+# wgpu reports a lost GPU device by panicking; gpu_array catches that and
+# returns an error. With panic = "abort" the whole host process died.
+panic = "unwind"
 incremental = false
 overflow-checks = false
 strip = true

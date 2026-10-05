@@ -1480,6 +1480,7 @@ fn sun(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compute_annual_bands, m)?)?;
     m.add_function(wrap_pyfunction!(horn_slope_aspect, m)?)?;
     m.add_function(wrap_pyfunction!(gpu_available, m)?)?;
+    m.add_function(wrap_pyfunction!(gpu_last_run_stats, m)?)?;
     Ok(())
 }
 
@@ -1489,4 +1490,15 @@ fn sun(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pyfunction]
 fn gpu_available() -> bool {
     gpu_array::gpu_available()
+}
+
+/// Submission counters of the most recent GPU band call:
+/// {"submissions": int, "max_submit_seconds": float}. Diagnostics/tests.
+#[pyfunction]
+fn gpu_last_run_stats(py: Python<'_>) -> PyResult<Bound<'_, pyo3::types::PyDict>> {
+    let s = gpu_array::last_run_stats();
+    let d = pyo3::types::PyDict::new_bound(py);
+    d.set_item("submissions", s.submissions)?;
+    d.set_item("max_submit_seconds", s.max_submit_seconds)?;
+    Ok(d)
 }

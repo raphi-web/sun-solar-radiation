@@ -36,8 +36,8 @@ struct Uniforms {
     dy: f32,         // pixel y size [m]
     // 0 → ray-march each shadow test; >0 → look up horizon[idx * n_az + bin].
     n_az: u32,
-    _pad0: u32,
-    _pad1: u32,
+    pixel_start: u32, // window start inside the tile (see gpu_array)
+    pixel_count: u32, // window length; 0 = whole tile
     _pad2: u32,
 }
 
@@ -210,8 +210,6 @@ async fn compute_raster_gpu_async(
     let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
     let step_rad = (step * std::f64::consts::PI / 12.0) as f32;
-    let workgroup_size = 64u32;
-    let max_dim = 65535u32;
 
     // ── Tile sizing ───────────────────────────────────────────────────────────
     // Even with the device's reported maximum, a single 8192² raster may still
@@ -440,6 +438,7 @@ async fn compute_raster_gpu_async(
 
     let mut row_start = 0usize;
     let mut tile_idx = 0usize;
+    let mut chunker = crate::gpu_array::Chunker::new();
     while row_start < nrows {
         let row_end = (row_start + tile_rows).min(nrows);
         let tile_h = row_end - row_start;
@@ -447,20 +446,14 @@ async fn compute_raster_gpu_async(
         let tile_byte_size = (tile_pixels * std::mem::size_of::<f32>()) as u64;
         let pixel_offset = row_start * ncols;
         let pixel_range = pixel_offset..pixel_offset + tile_pixels;
-
-        // Per-tile dispatch geometry (2D grid keeps each axis under 65535).
-        let total_workgroups = (tile_pixels as u32).div_ceil(workgroup_size);
-        let (num_workgroups_x, num_workgroups_y) = if total_workgroups <= max_dim {
-            (total_workgroups, 1u32)
-        } else {
-            let x = max_dim;
-            let y = total_workgroups.div_ceil(x);
-            (x, y)
-        };
-        let dispatch_x_pixels = num_workgroups_x * workgroup_size;
+        chunker.begin_tile(crate::gpu_array::group_weights(tile_pixels, |i| {
+            let j = pixel_offset + i;
+            crate::gpu_array::pixel_computed(elev_data[j], slope_data[j], aspect_data[j], mask_data[j])
+        }));
 
         // Per-tile uniforms — pixel latitude is read from the per-row buffer
-        // (binding 12), sliced to the tile's row range below.
+        // (binding 12), sliced to the tile's row range below. The dispatch
+        // window fields are filled per submission by dispatch_in_windows.
         let uniforms = Uniforms {
             sindecl,
             cosdecl,
@@ -468,15 +461,15 @@ async fn compute_raster_gpu_async(
             step_rad,
             ncols: ncols as u32,
             nrows: tile_h as u32,
-            dispatch_x_pixels,
+            dispatch_x_pixels: 0,
             full_nrows: nrows as u32,
             row_offset: row_start as u32,
             max_z,
             dx,
             dy,
             n_az: 0, // single-day path: always use ray-march
-            _pad0: 0,
-            _pad1: 0,
+            pixel_start: 0,
+            pixel_count: 0,
             _pad2: 0,
         };
         // Dummy 4-byte horizon buffer satisfies the shader binding when n_az=0.
@@ -603,30 +596,37 @@ async fn compute_raster_gpu_async(
             ],
         });
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("encoder"),
-        });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("r.sun pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups(num_workgroups_x, num_workgroups_y, 1);
+        let mut write = |pixel_start: u32, pixel_count: u32, dispatch_x_pixels: u32| {
+            let u = Uniforms {
+                dispatch_x_pixels,
+                pixel_start,
+                pixel_count,
+                ..uniforms
+            };
+            queue.write_buffer(&uniform_buf, 0, bytemuck::bytes_of(&u));
+        };
+        if !quiet {
+            eprintln!("GPU  Tile {tile_idx}: rows {row_start}..{row_end}");
         }
+        crate::gpu_array::dispatch_in_windows(
+            &device,
+            &queue,
+            &pipeline,
+            &bind_group,
+            &mut chunker,
+            tile_pixels,
+            &mut write,
+            &|| Ok(()),
+        )?;
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("readback"),
+        });
         encoder.copy_buffer_to_buffer(&buf_out_beam, 0, &stage_beam, 0, tile_byte_size);
         encoder.copy_buffer_to_buffer(&buf_out_diff, 0, &stage_diff, 0, tile_byte_size);
         encoder.copy_buffer_to_buffer(&buf_out_refl, 0, &stage_refl, 0, tile_byte_size);
         encoder.copy_buffer_to_buffer(&buf_out_glob, 0, &stage_glob, 0, tile_byte_size);
         encoder.copy_buffer_to_buffer(&buf_out_insol, 0, &stage_insol, 0, tile_byte_size);
-
-        if !quiet {
-            eprintln!(
-                "GPU  Tile {tile_idx}: rows {row_start}..{row_end}, dispatch \
-                 {num_workgroups_x}×{num_workgroups_y} workgroups"
-            );
-        }
         queue.submit(std::iter::once(encoder.finish()));
 
         if !quiet {

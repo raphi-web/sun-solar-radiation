@@ -139,6 +139,23 @@ potential = sun.compute_annual_bands(
 )   # flat float32, kWh/m²/year, nodata = -9999
 ```
 
+### GPU errors
+
+The GPU path splits its work into short submissions (about 0.2 s each), so
+desktop drivers never reset the GPU on large DEMs. If the GPU still fails
+(driver reset, device lost), the call raises `RuntimeError` starting with
+`GPU computation failed` instead of crashing the host process. Retry with
+`gpu=False`:
+
+```python
+try:
+    out = sun.compute_raster_bands(..., gpu=True)
+except RuntimeError:
+    out = sun.compute_raster_bands(..., gpu=False)
+```
+
+`SUN_GPU_MAX_SUBMIT_SECONDS` changes the per-submission budget.
+
 ### Terrain helpers
 
 ```python
