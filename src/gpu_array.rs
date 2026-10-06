@@ -52,9 +52,10 @@ struct Uniforms {
     _pad2: u32,
 }
 
-/// Default GPU time budget per submission [s]: a 10× margin under the ~2 s
-/// driver watchdog. `SUN_GPU_MAX_SUBMIT_SECONDS` overrides it.
-const DEFAULT_SUBMIT_BUDGET_S: f64 = 0.2;
+/// Default GPU time budget per submission [s]: one 60 Hz frame, so the
+/// desktop compositor never waits more than ~16 ms when the iGPU is shared.
+/// `SUN_GPU_MAX_SUBMIT_SECONDS` overrides it.
+const DEFAULT_SUBMIT_BUDGET_S: f64 = 0.016;
 /// Windows are whole 64-pixel groups (one workgroup each).
 const GROUP: usize = 64;
 /// First window of a tile when nothing has been measured yet.
