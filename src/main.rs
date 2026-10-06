@@ -4,6 +4,7 @@
 /// All computation logic lives in `lib.rs`.
 use clap::Parser;
 use sun::{
+    annual::{compute_annual_potential_cpu, compute_annual_potential_gpu},
     create_dummy_elevation,
     gpu::compute_raster_gpu,
     run_raster_computation,
@@ -60,9 +61,33 @@ struct Args {
     #[arg(long, default_value = "1367.0")]
     solar_constant: f64,
 
-    /// Day of year [1–365]
-    #[arg(long, required = true)]
-    day: i32,
+    /// Day of year [1–365]. Required unless --day-start is given (annual mode).
+    #[arg(long)]
+    day: Option<i32>,
+
+    /// First day of the sampled year [1–365] (annual mode).
+    #[arg(long, requires = "day_end")]
+    day_start: Option<i32>,
+
+    /// Last day of the sampled year [1–365] (annual mode).
+    #[arg(long, requires = "day_step")]
+    day_end: Option<i32>,
+
+    /// Sampling interval in days (annual mode).
+    #[arg(long, default_value = "10")]
+    day_step: i32,
+
+    /// Panel efficiency for PV potential [0–1] (annual mode).
+    #[arg(long, default_value = "0.21")]
+    panel_efficiency: f64,
+
+    /// Use precomputed horizon shadows (annual mode, GPU only).
+    #[arg(long, default_value = "false")]
+    use_horizon: bool,
+
+    /// Number of azimuth bins for horizon shadows (annual mode, GPU only).
+    #[arg(long, default_value = "64")]
+    horizon_n_az: u32,
 
     /// Time step for daily integration [decimal hours]
     #[arg(long, default_value = "0.5")]
@@ -87,6 +112,10 @@ struct Args {
     /// Output insolation time raster [h/day]
     #[arg(long)]
     insol_time: Option<String>,
+
+    /// Output annual PV potential raster [kWh/m²/year] (annual mode)
+    #[arg(long)]
+    annual_potential: Option<String>,
 
     /// Create and use a dummy test raster (100×100 pixels over Austria)
     #[arg(long, default_value = "false")]
@@ -121,71 +150,149 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let elev_path = args.elevation.as_deref().expect("elevation required");
 
-    if !(1..=365).contains(&args.day) {
-        return Err(format!("Day must be 1–365, got {}", args.day).into());
-    }
-    if args.step <= 0.0 || args.step > 24.0 {
-        return Err(format!("Step must be 0–24h, got {}", args.step).into());
-    }
+    let is_annual = args.day_start.is_some();
 
-    let declination = com_declin(args.day);
-    let g_norm_extra = com_sol_const(args.day, args.solar_constant);
-    if !args.quiet {
-        eprintln!(
-            "Day: {}  |  Declination: {:.2}°  |  G0: {:.1} W/m²",
-            args.day,
-            -declination * RAD2DEG,
-            g_norm_extra
-        );
-    }
-
-    if args.gpu {
-        if !args.quiet {
-            eprintln!("Using WebGPU acceleration…");
+    if is_annual {
+        // ── Annual mode ────────────────────────────────────────────────────
+        let ds = args.day_start.unwrap();
+        let de = args.day_end.unwrap();
+        if ds < 1 || ds > 365 || de < 1 || de > 365 || ds > de {
+            return Err(format!(
+                "day-start ({ds}) and day-end ({de}) must be 1–365 with start ≤ end"
+            )
+            .into());
         }
-        compute_raster_gpu(
-            elev_path,
-            &args.slope,
-            &args.aspect,
-            &args.linke,
-            &args.albedo,
-            &args.mask,
-            args.slope_value,
-            args.aspect_value,
-            args.linke_value,
-            args.albedo_value,
-            args.day,
-            args.step,
-            args.solar_constant,
-            &args.glob_rad,
-            &args.beam_rad,
-            &args.diff_rad,
-            &args.refl_rad,
-            &args.insol_time,
-            args.quiet,
-        )?;
+        if args.day_step <= 0 {
+            return Err(format!("day-step must be positive, got {}", args.day_step).into());
+        }
+        if args.panel_efficiency < 0.0 || args.panel_efficiency > 1.0 {
+            return Err(format!(
+                "panel-efficiency must be 0–1, got {}",
+                args.panel_efficiency
+            )
+            .into());
+        }
+        let pot_path = args
+            .annual_potential
+            .as_deref()
+            .ok_or("--annual-potential <path> is required in annual mode")?;
+
+        if args.gpu {
+            compute_annual_potential_gpu(
+                elev_path,
+                &args.slope,
+                &args.aspect,
+                &args.linke,
+                &args.albedo,
+                &args.mask,
+                args.slope_value,
+                args.aspect_value,
+                args.linke_value,
+                args.albedo_value,
+                ds,
+                de,
+                args.day_step,
+                args.step,
+                args.solar_constant,
+                args.panel_efficiency,
+                pot_path,
+                args.use_horizon,
+                args.horizon_n_az as usize,
+                args.quiet,
+            )?;
+        } else {
+            compute_annual_potential_cpu(
+                elev_path,
+                &args.slope,
+                &args.aspect,
+                &args.linke,
+                &args.albedo,
+                &args.mask,
+                args.slope_value,
+                args.aspect_value,
+                args.linke_value,
+                args.albedo_value,
+                ds,
+                de,
+                args.day_step,
+                args.step,
+                args.solar_constant,
+                args.panel_efficiency,
+                pot_path,
+                args.use_horizon,
+                args.horizon_n_az as usize,
+                args.quiet,
+            )?;
+        }
     } else {
-        run_raster_computation(
-            elev_path,
-            &args.slope,
-            &args.aspect,
-            &args.linke,
-            &args.albedo,
-            &args.mask,
-            args.slope_value,
-            args.aspect_value,
-            args.linke_value,
-            args.albedo_value,
-            args.day,
-            args.step,
-            args.solar_constant,
-            &args.glob_rad,
-            &args.beam_rad,
-            &args.diff_rad,
-            &args.refl_rad,
-            &args.insol_time,
-            args.quiet,
-        )?;
+        // ── Daily mode ─────────────────────────────────────────────────────
+        let day = args.day.ok_or("--day <1-365> is required in daily mode")?;
+        if !(1..=365).contains(&day) {
+            return Err(format!("Day must be 1–365, got {day}").into());
+        }
+        if args.step <= 0.0 || args.step > 24.0 {
+            return Err(format!("Step must be 0–24h, got {}", args.step).into());
+        }
+
+        let declination = com_declin(day);
+        let g_norm_extra = com_sol_const(day, args.solar_constant);
+        if !args.quiet {
+            eprintln!(
+                "Day: {}  |  Declination: {:.2}°  |  G0: {:.1} W/m²",
+                day,
+                -declination * RAD2DEG,
+                g_norm_extra
+            );
+        }
+
+        if args.gpu {
+            if !args.quiet {
+                eprintln!("Using WebGPU acceleration…");
+            }
+            compute_raster_gpu(
+                elev_path,
+                &args.slope,
+                &args.aspect,
+                &args.linke,
+                &args.albedo,
+                &args.mask,
+                args.slope_value,
+                args.aspect_value,
+                args.linke_value,
+                args.albedo_value,
+                day,
+                args.step,
+                args.solar_constant,
+                &args.glob_rad,
+                &args.beam_rad,
+                &args.diff_rad,
+                &args.refl_rad,
+                &args.insol_time,
+                args.quiet,
+            )?;
+        } else {
+            run_raster_computation(
+                elev_path,
+                &args.slope,
+                &args.aspect,
+                &args.linke,
+                &args.albedo,
+                &args.mask,
+                args.slope_value,
+                args.aspect_value,
+                args.linke_value,
+                args.albedo_value,
+                day,
+                args.step,
+                args.solar_constant,
+                &args.glob_rad,
+                &args.beam_rad,
+                &args.diff_rad,
+                &args.refl_rad,
+                &args.insol_time,
+                args.quiet,
+            )?;
+        }
     }
 
     Ok(())
