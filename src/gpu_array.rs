@@ -825,11 +825,12 @@ fn annual_band_gpu(
     horizon: Option<&HorizonMap>,
     quiet: bool,
 ) -> Result<Vec<f32>, String> {
-    let band_is_full = inp.row_offset == 0 && inp.nrows == inp.full_nrows;
-    let n_az_u32 = if band_is_full && horizon.is_some() {
-        horizon.unwrap().n_az as u32
-    } else {
-        0
+    // Horizon: precomputed per full-grid pixel, sliced to the band below.
+    // The shader indexes the band-local horizon buffer with the tile-local
+    // pixel index, so this works for partial bands too.
+    let n_az_u32 = match horizon {
+        Some(hm) => hm.n_az as u32,
+        None => 0,
     };
 
     let day_consts: Vec<(f32, f32, f32)> = days
