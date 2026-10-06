@@ -26,7 +26,7 @@ gdal-io = ["dep:gdal", "dep:clap"]
 [dependencies]
 gdal = { version = "0.17", features = ["bindgen"], optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
-pyo3 = { version = "0.22", features = ["extension-module"] }
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py312"] }
 numpy = "0.22"
 wgpu = "22"
 bytemuck = { version = "1", features = ["derive"] }
